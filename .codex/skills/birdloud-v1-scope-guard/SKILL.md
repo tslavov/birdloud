@@ -18,6 +18,7 @@ Use this skill for feature planning, code review, implementation scoping, milest
 - Treat the repository as public; never add secrets, real credentials, production URLs, real voter data, or sensitive environment values.
 - Preserve the V1 promise: fast and simple for normal voters; expensive, visible, and limited for attackers.
 - Keep V1 focused on soft identity, duplicate-credential prevention, rate limits, review queues, integrity scoring, idempotency, receipts, vote attempts, and immutable ledger events.
+- Keep the stack simple: monorepo with `apps/web` and `apps/api`; React Router 7/Tailwind/shadcn for web; Fastify/TypeScript/Prisma/PostgreSQL/Redis/Zod/OpenAPI for API; Better Auth for organizer/admin auth; Cloudflare Turnstile for bot protection; Railway first with Docker.
 - Prefer OAuth or email identity plus optional invite tokens.
 - Include bot protection for public voting.
 - Ensure results show integrity context, not only raw totals.
@@ -27,6 +28,7 @@ Use this skill for feature planning, code review, implementation scoping, milest
 
 - Do not claim strict one-person-one-vote guarantees in V1.
 - Do not add SMS, paid phone checks, government ID, full voter accounts, MFA, legal-grade certification, blockchain, public cryptographic verification, or ML fraud detection unless explicitly scoped as future work.
+- Do not add queues, Kafka, Kubernetes, microservices, webhook delivery, self-managed PgBouncer, or advanced infrastructure in V1.
 - Do not commit `.env` files, OAuth secrets, database URLs, Redis URLs, Turnstile secrets, production salts, invite tokens, or real identity data.
 - Do not silently count suspicious submissions.
 - Do not add complex abstractions before the MVP needs them.

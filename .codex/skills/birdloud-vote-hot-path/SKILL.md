@@ -17,6 +17,7 @@ Use this skill for vote submission, retry behavior, duplicate prevention, race c
 
 - Treat all committed tests, fixtures, and examples as public; use fake tokens, fake identities, and fake receipts.
 - Keep the vote endpoint short and transactional.
+- Keep Redis limited to temporary rate limits and abuse counters.
 - Validate request shape, campaign status, option, bot-protection token, and identity proof.
 - Claim or replay idempotency before creating side effects.
 - Resolve or create campaign-scoped `identity_id`.
@@ -29,6 +30,7 @@ Use this skill for vote submission, retry behavior, duplicate prevention, race c
 ## What Not To Do
 
 - Do not call webhooks, send emails, generate exports, recompute dashboards, or run expensive fraud analysis in the vote transaction.
+- Do not add queues, Kafka, workflow engines, microservices, or webhook delivery for V1 vote handling.
 - Do not commit real idempotency keys, invite tokens, OAuth tokens, receipt values, webhook URLs, or production request logs.
 - Do not rely only on application checks for duplicate credentials; use database constraints too.
 - Do not make risky votes silently counted.

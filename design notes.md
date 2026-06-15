@@ -96,16 +96,17 @@ BirdLoud should use a simple layered backend:
 - PostgreSQL for durable records.
 - Strong database constraints for race-condition safety.
 - Immutable ledger records for auditability.
-- Redis for rate limits, short-lived idempotency cache, and abuse counters.
+- Redis only for temporary rate limits and abuse counters.
 
 ### Scalability and Reliability Layer
 
 - Stateless API servers behind a load balancer.
 - Horizontal scaling for short campaign traffic spikes.
-- Database connection pooling, ideally PgBouncer or managed pooler.
+- Managed PostgreSQL connection pooling if available.
 - Short vote transactions with no slow external calls.
-- Read replicas or cached projections for result dashboards if traffic grows.
+- Simple cached reads for dashboards if traffic grows.
 - Health checks and basic autoscaling rules.
+- No self-managed PgBouncer, Kubernetes, Kafka, queues, or microservices in V1.
 
 ### Review and Integrity Layer
 
@@ -351,7 +352,7 @@ vote_attempts (
 
 ### `vote_ledger`
 
-Immutable append-only event history. This should be the internal source for audit trails and future webhook delivery.
+Immutable append-only event history. This should be the internal source for audit trails and future integrations. Do not add webhook delivery in V1.
 
 ```sql
 vote_ledger (
@@ -1368,15 +1369,9 @@ Recommendations:
 
 Do not put the actual vote decision only in a background queue for V1. Voters need a clear immediate response, and duplicate-credential enforcement is easiest to enforce inside the database transaction.
 
-Use background workers for:
+Keep V1 synchronous and simple. Do not add queues, Kafka, or workflow infrastructure.
 
-- Webhook delivery.
-- Result projections.
-- Integrity score refreshes.
-- Notifications.
-- Exports.
-- Admin reports.
-- Heavier suspicious-pattern analysis.
+Allowed lightweight async work in V1 should be limited to simple scheduled jobs or request-adjacent maintenance tasks, such as expiring delayed votes or refreshing integrity counters. Do not add webhook delivery, event queues, or complex projection systems in V1.
 
 If the system is overloaded:
 
@@ -1673,44 +1668,57 @@ Use a consistent error shape:
 
 Recommended V1 stack:
 
-### Frontend
+### Monorepo
 
-- Next.js
+- `apps/web`
+- `apps/api`
+
+### Frontend / `apps/web`
+
+- React Router 7
+- TypeScript
 - Tailwind CSS
 - shadcn/ui
 
-### Backend
+### Backend / `apps/api`
 
 - Fastify
 - TypeScript
 - Prisma
 - PostgreSQL
-- Redis
-- Zod for request validation
+- Redis only for temporary rate limits and abuse counters
+- Zod for request validation unless TypeBox is explicitly chosen later
 - OpenAPI/Swagger for API docs
+- Better Auth for organizer/admin authentication
+- Cloudflare Turnstile for bot protection
 
 ### Infrastructure
 
 - Docker
-- Railway or Fly.io
+- Railway first
 - Cloudflare
 - Managed PostgreSQL
 - Managed Redis
-- PgBouncer or managed PostgreSQL connection pooling
+- Managed PostgreSQL connection pooling if available
+- Do not self-manage PgBouncer in V1
 - Basic autoscaling and health checks
 
-My thought: Fastify, Prisma, PostgreSQL, and Redis are a good fit here. The system needs clear transactional behavior and fast API responses more than it needs a heavy framework.
+Do not add queues, Kafka, Kubernetes, microservices, ML fraud detection, blockchain, webhook delivery, or advanced infrastructure in V1.
+
+My thought: Fastify, Prisma, PostgreSQL, Redis, and Railway are a good fit here. The system needs clear transactional behavior and fast API responses more than it needs a heavy framework.
 
 ## 14. Implementation Phases / MVP Plan
 
 ### Phase 1: Core Foundation
 
+- Create monorepo structure with `apps/web` and `apps/api`.
+- Set up React Router 7 TypeScript app in `apps/web`.
 - Set up Fastify TypeScript API.
 - Add Prisma and PostgreSQL.
 - Add Redis.
-- Add database connection pooling.
+- Use managed PostgreSQL connection pooling if available.
 - Add request validation and OpenAPI docs.
-- Add organizer authentication.
+- Add Better Auth for organizer/admin authentication.
 - Add role-based authorization.
 - Add health checks and structured request logs.
 
@@ -1778,14 +1786,11 @@ My thought: Fastify, Prisma, PostgreSQL, and Redis are a good fit here. The syst
 - Add automatic identity merging across providers.
 - Add legal-grade election certification workflows.
 
-### Phase 8: Automation and Advanced Integrity
+### Phase 8: Later Automation and Advanced Integrity
 
-- Add webhook endpoint management.
-- Add webhook signing.
-- Add webhook delivery worker.
-- Add retry and backoff logic.
-- Add delivery logs for organizers.
-- Add event catalog documentation.
+- Design webhook endpoint management only when automation becomes a priority.
+- Add webhook signing and delivery only in a later explicitly scoped phase.
+- Add event catalog documentation when webhook work starts.
 - Add advanced admin dashboards.
 - Add complex fraud models only after simple rules are insufficient.
 
@@ -1807,6 +1812,7 @@ Move these outside the V1 core:
 - Blockchain or public ledger.
 - Complex result projections.
 - Webhooks and third-party automation.
+- Queues, Kafka, Kubernetes, microservices, and advanced infrastructure.
 
 ## Recommended V1 Scope
 
@@ -1909,14 +1915,19 @@ Complete these decisions and setup tasks before implementation starts:
    - Decide log and identity evidence retention windows.
 
 8. Choose infrastructure for V1.
+   - Monorepo with `apps/web` and `apps/api`.
+   - React Router 7 + TypeScript + Tailwind + shadcn/ui in `apps/web`.
    - Fastify + TypeScript.
+   - Better Auth for organizer/admin authentication.
    - Prisma.
    - PostgreSQL.
    - Redis.
    - Cloudflare Turnstile.
    - Docker.
-   - Railway or Fly.io.
-   - PgBouncer or managed PostgreSQL pooling.
+   - Railway first.
+   - Managed PostgreSQL pooling if available.
+   - No self-managed PgBouncer in V1.
+   - No queues, Kafka, Kubernetes, microservices, ML fraud detection, blockchain, webhook delivery, or advanced infrastructure.
 
 9. Define API contract first.
    - Organizer auth.

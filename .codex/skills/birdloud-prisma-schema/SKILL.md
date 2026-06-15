@@ -17,6 +17,7 @@ Use this skill for schema design, migrations, model naming, constraints, indexes
 
 - Assume the repo is public; migrations, seeds, fixtures, and examples must contain only fake safe data.
 - PostgreSQL is the source of truth.
+- Prisma belongs in `apps/api`; keep the repo as a simple `apps/web` and `apps/api` monorepo.
 - Core V1 models include elections, campaigns, campaign options, voter identities, invite tokens, votes, vote attempts, vote ledger, idempotency keys, identity verification events, identity conflicts, audit logs, and result counters if needed.
 - Use enums or constrained values for statuses and confidence levels.
 - Votes reference `identity_id` when available.
@@ -31,6 +32,7 @@ Use this skill for schema design, migrations, model naming, constraints, indexes
 - Do not model full voter accounts or canonical person merging for V1.
 - Do not store unnecessary raw personal data.
 - Do not commit real voter data, real provider subject IDs, real emails, real IPs, production salts, database URLs, or backup dumps.
+- Do not introduce event-store databases, queues, Kafka, or cross-service persistence.
 - Do not make result counters the only source of truth.
 - Do not omit database constraints and rely only on service logic.
 

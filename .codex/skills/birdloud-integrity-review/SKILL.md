@@ -17,6 +17,7 @@ Use this skill when work affects abuse detection, vote status decisions, review 
 
 - Treat logs, fixtures, and examples as public; use synthetic data only.
 - Keep risk scoring simple and explainable.
+- Keep Redis limited to temporary rate limits and abuse counters.
 - Use confidence levels: `high`, `medium`, `low`.
 - Use statuses: `counted`, `delayed`, `under_review`, `blocked`, `rejected`.
 - Track signals such as duplicate credential, device hash volume, IP/network volume, suspicious user agent, abnormal speed, failed attempts, low-trust identity bursts, and invalid/reused invite tokens.
@@ -29,6 +30,7 @@ Use this skill when work affects abuse detection, vote status decisions, review 
 
 - Do not silently count suspicious mass voting.
 - Do not overfit with complex ML or opaque rules in V1.
+- Do not introduce ML fraud detection, Kafka, queues, microservices, or advanced integrity infrastructure in V1.
 - Do not treat shared IP/device as proof of cheating.
 - Do not publish real abuse logs, real IPs, real device fingerprints, real identity hashes, or production integrity data.
 - Do not present the integrity score as legal-grade validation.

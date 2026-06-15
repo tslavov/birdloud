@@ -17,6 +17,7 @@ Use this skill for endpoint design, request/response bodies, status codes, valid
 
 - Keep public examples sanitized; use fake IDs, fake tokens, fake emails, and placeholder URLs only.
 - API-first REST/JSON design.
+- Organizer/admin authentication should use Better Auth.
 - Validate input with Zod.
 - Document endpoints with OpenAPI.
 - Organizer APIs cover auth, elections, campaigns, choices, optional invite tokens, review, results, and integrity.
@@ -42,6 +43,7 @@ Use this skill for endpoint design, request/response bodies, status codes, valid
 
 - Do not expose raw private identity signals.
 - Do not include real secrets, production hostnames, real voter identifiers, real OAuth tokens, real invite tokens, or real receipts in examples or tests.
+- Do not design APIs around queues, Kafka, webhook delivery, microservices, or advanced infrastructure for V1.
 - Do not return selected vote from receipt verification.
 - Do not add future-only APIs as V1 endpoints unless explicitly requested.
 - Do not use ambiguous success responses for delayed or review states.

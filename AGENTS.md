@@ -55,17 +55,24 @@ Do not build into V1 unless explicitly requested:
 - Blockchain or public ledger.
 - Complex result projections.
 - Webhooks and third-party automation.
+- Queues, Kafka, Kubernetes, microservices, ML fraud detection, blockchain, webhook delivery, and advanced infrastructure.
 
 ## Expected Stack
 
-- Backend: Fastify + TypeScript.
+- Monorepo: `apps/web` and `apps/api`.
+- Web app: React Router 7 + TypeScript + Tailwind CSS + shadcn/ui.
+- API app: Fastify + TypeScript + Prisma + PostgreSQL + Redis.
 - Database: PostgreSQL.
 - ORM: Prisma.
-- Cache/rate limits: Redis.
-- Validation: Zod.
+- Cache/counters: Redis only for temporary rate limits and abuse counters.
+- Validation: Zod unless TypeBox has already been explicitly chosen.
 - API docs: OpenAPI/Swagger.
-- Bot protection: Cloudflare Turnstile or CAPTCHA-style provider.
-- Infrastructure target: Docker, managed PostgreSQL, managed Redis, PgBouncer or managed PostgreSQL pooling.
+- Auth: Better Auth for organizer/admin authentication.
+- Bot protection: Cloudflare Turnstile.
+- Deployment: Railway first, Docker-based.
+- Connection pooling: use managed PostgreSQL pooling if available; do not self-manage PgBouncer in V1.
+
+Do not add queues, Kafka, Kubernetes, microservices, ML fraud detection, blockchain, webhook delivery, or advanced infrastructure.
 
 ## Core Data/Behavior Rules
 
