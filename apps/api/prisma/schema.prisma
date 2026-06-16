@@ -1,0 +1,427 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ORGANIZER @map("organizer")
+  ADMIN     @map("admin")
+}
+
+enum ElectionStatus {
+  DRAFT    @map("draft")
+  ACTIVE   @map("active")
+  CLOSED   @map("closed")
+  ARCHIVED @map("archived")
+}
+
+enum CampaignStatus {
+  DRAFT  @map("draft")
+  ACTIVE @map("active")
+  CLOSED @map("closed")
+}
+
+enum IdentityMode {
+  SOFT_IDENTITY         @map("soft_identity")
+  INVITE_TOKEN_OPTIONAL @map("invite_token_optional")
+}
+
+enum DuplicateIdentityPolicy {
+  COUNT_WITH_RISK @map("count_with_risk")
+  REVIEW          @map("review")
+  BLOCK           @map("block")
+}
+
+enum TokenStatus {
+  ACTIVE  @map("active")
+  USED    @map("used")
+  REVOKED @map("revoked")
+  EXPIRED @map("expired")
+}
+
+enum IdentityProvider {
+  GOOGLE       @map("google")
+  MICROSOFT    @map("microsoft")
+  FACEBOOK     @map("facebook")
+  EMAIL        @map("email")
+  INVITE_TOKEN @map("invite_token")
+}
+
+enum TrustLevel {
+  HIGH   @map("high")
+  MEDIUM @map("medium")
+  LOW    @map("low")
+}
+
+enum VoteStatus {
+  COUNTED      @map("counted")
+  DELAYED      @map("delayed")
+  UNDER_REVIEW @map("under_review")
+  BLOCKED      @map("blocked")
+  REJECTED     @map("rejected")
+}
+
+enum AttemptOutcome {
+  COUNTED      @map("counted")
+  DUPLICATE    @map("duplicate")
+  DELAYED      @map("delayed")
+  BLOCKED      @map("blocked")
+  UNDER_REVIEW @map("under_review")
+  INVALID      @map("invalid")
+}
+
+enum IdempotencyStatus {
+  PROCESSING @map("processing")
+  COMPLETED  @map("completed")
+  FAILED     @map("failed")
+}
+
+enum ConflictStatus {
+  OPEN      @map("open")
+  RESOLVED  @map("resolved")
+  DISMISSED @map("dismissed")
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
+  name          String?
+  emailVerified Boolean   @default(false)
+  image         String?
+  role          UserRole  @default(ORGANIZER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  elections     Election[]
+  auditLogs     AuditLog[]
+  resolvedConflicts IdentityConflict[] @relation("IdentityConflictResolver")
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String    @db.Uuid
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verifications")
+}
+
+model Election {
+  id          String         @id @default(uuid()) @db.Uuid
+  organizerId String        @db.Uuid
+  title       String
+  description String?
+  status      ElectionStatus @default(DRAFT)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  organizer User       @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+  auditLogs AuditLog[]
+
+  @@index([organizerId])
+  @@index([status, startsAt, endsAt])
+  @@map("elections")
+}
+
+model Campaign {
+  id                      String                  @id @default(uuid()) @db.Uuid
+  electionId              String                  @db.Uuid
+  title                   String
+  description             String?
+  status                  CampaignStatus          @default(DRAFT)
+  identityMode            IdentityMode            @default(SOFT_IDENTITY)
+  startsAt                DateTime?
+  endsAt                  DateTime?
+  allowReviewQueue        Boolean                 @default(true)
+  duplicateIdentityPolicy DuplicateIdentityPolicy @default(REVIEW)
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+
+  election       Election                    @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  options        CampaignOption[]
+  identities     VoterIdentity[]
+  tokens         VoterToken[]
+  votes          Vote[]
+  attempts       VoteAttempt[]
+  ledgerEvents   VoteLedger[]
+  idempotencyKeys IdempotencyKey[]
+  identityEvents IdentityVerificationEvent[]
+  identityConflicts IdentityConflict[]
+  optionCounts   CampaignOptionCount[]
+  auditLogs      AuditLog[]
+
+  @@index([electionId])
+  @@index([status, startsAt, endsAt])
+  @@map("campaigns")
+}
+
+model CampaignOption {
+  id          String   @id @default(uuid()) @db.Uuid
+  campaignId  String   @db.Uuid
+  label       String
+  description String?
+  position    Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  votes    Vote[]
+  counts   CampaignOptionCount?
+
+  @@unique([campaignId, position])
+  @@index([campaignId, isActive])
+  @@map("campaign_options")
+}
+
+model VoterIdentity {
+  id                  String           @id @default(uuid()) @db.Uuid
+  campaignId          String           @db.Uuid
+  provider            IdentityProvider
+  providerSubjectHash String?
+  emailHash           String?
+  deviceHash          String?
+  firstIpHash         String?
+  userAgentHash       String?
+  trustLevel          TrustLevel
+  createdAt           DateTime         @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  votes    Vote[]
+  identityEvents IdentityVerificationEvent[]
+  conflicts IdentityConflict[]
+
+  @@unique([campaignId, provider, providerSubjectHash])
+  @@index([campaignId, emailHash])
+  @@index([campaignId, deviceHash])
+  @@index([campaignId, firstIpHash])
+  @@map("voter_identities")
+}
+
+model VoterToken {
+  id              String      @id @default(uuid()) @db.Uuid
+  campaignId      String      @db.Uuid
+  tokenHash       String
+  status          TokenStatus @default(ACTIVE)
+  usedAt          DateTime?
+  revokedAt       DateTime?
+  issuedLabelHash String?
+  createdAt       DateTime    @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  votes    Vote[]
+
+  @@unique([campaignId, tokenHash])
+  @@index([campaignId, status])
+  @@map("voter_tokens")
+}
+
+model Vote {
+  id              String      @id @default(uuid()) @db.Uuid
+  campaignId      String      @db.Uuid
+  optionId        String      @db.Uuid
+  identityId      String?     @db.Uuid
+  voterTokenId    String?     @db.Uuid
+  voterKeyHash    String
+  receiptHash     String      @unique
+  status          VoteStatus
+  confidenceLevel TrustLevel
+  riskScore       Int         @default(0)
+  reviewReason    String?
+  ipHash          String?
+  deviceHash      String?
+  userAgentHash   String?
+  createdAt       DateTime    @default(now())
+  reviewedAt      DateTime?
+
+  campaign   Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  option     CampaignOption  @relation(fields: [optionId], references: [id])
+  identity   VoterIdentity?  @relation(fields: [identityId], references: [id])
+  voterToken VoterToken?     @relation(fields: [voterTokenId], references: [id])
+  ledgerEvents VoteLedger[]
+
+  @@unique([campaignId, voterKeyHash])
+  @@index([campaignId, status])
+  @@index([campaignId, confidenceLevel])
+  @@index([identityId])
+  @@map("votes")
+}
+
+model VoteAttempt {
+  id            String         @id @default(uuid()) @db.Uuid
+  campaignId    String?        @db.Uuid
+  optionId      String?        @db.Uuid
+  voterKeyHash  String?
+  ipHash        String?
+  deviceHash    String?
+  userAgentHash String?
+  outcome       AttemptOutcome
+  reason        String?
+  riskScore     Int            @default(0)
+  createdAt     DateTime       @default(now())
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, outcome])
+  @@index([campaignId, createdAt])
+  @@index([ipHash])
+  @@index([deviceHash])
+  @@map("vote_attempts")
+}
+
+model VoteLedger {
+  id         String   @id @default(uuid()) @db.Uuid
+  voteId     String?  @db.Uuid
+  campaignId String?  @db.Uuid
+  eventType  String
+  payload    Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  vote     Vote?     @relation(fields: [voteId], references: [id], onDelete: SetNull)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, eventType])
+  @@index([voteId])
+  @@map("vote_ledger")
+}
+
+model IdempotencyKey {
+  id           String            @id @default(uuid()) @db.Uuid
+  campaignId   String            @db.Uuid
+  key          String
+  requestHash  String
+  status       IdempotencyStatus
+  responseBody Json?
+  statusCode   Int?
+  createdAt    DateTime          @default(now())
+  expiresAt    DateTime
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+model IdentityVerificationEvent {
+  id         String        @id @default(uuid()) @db.Uuid
+  campaignId String        @db.Uuid
+  identityId String?       @db.Uuid
+  provider   String
+  eventType  String
+  trustLevel TrustLevel
+  riskScore  Int           @default(0)
+  reason     String?
+  metadata   Json          @default("{}")
+  createdAt  DateTime      @default(now())
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  identity VoterIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, eventType])
+  @@index([identityId])
+  @@map("identity_verification_events")
+}
+
+model IdentityConflict {
+  id           String         @id @default(uuid()) @db.Uuid
+  campaignId   String         @db.Uuid
+  identityId   String?        @db.Uuid
+  conflictType String
+  confidence   TrustLevel
+  reason       String
+  status       ConflictStatus @default(OPEN)
+  metadata     Json           @default("{}")
+  createdAt    DateTime       @default(now())
+  resolvedAt   DateTime?
+  resolvedBy   String?        @db.Uuid
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  identity VoterIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+  resolver User?          @relation("IdentityConflictResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, status])
+  @@index([identityId])
+  @@map("identity_conflicts")
+}
+
+model CampaignOptionCount {
+  campaignId       String   @db.Uuid
+  optionId         String   @unique @db.Uuid
+  countedVotes     BigInt   @default(0)
+  delayedVotes     BigInt   @default(0)
+  underReviewVotes BigInt   @default(0)
+  rejectedVotes    BigInt   @default(0)
+  updatedAt        DateTime @updatedAt
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  option   CampaignOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, optionId])
+  @@map("campaign_option_counts")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @db.Uuid
+  electionId  String?  @db.Uuid
+  campaignId  String?  @db.Uuid
+  action      String
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  actor    User?     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  election Election? @relation(fields: [electionId], references: [id], onDelete: SetNull)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([campaignId, action])
+  @@map("audit_logs")
+}

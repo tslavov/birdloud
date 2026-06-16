@@ -1,0 +1,26 @@
+{
+  "name": "birdloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:web": "npm run dev -w @birdloud/web",
+    "dev:api": "npm run dev -w @birdloud/api",
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "validate": "npm run check && npm run test && npm run build",
+    "prisma:generate": "npm run prisma:generate -w @birdloud/api"
+  },
+  "overrides": {
+    "vite": "^8.0.16",
+    "esbuild": "^0.28.1"
+  }
+}
