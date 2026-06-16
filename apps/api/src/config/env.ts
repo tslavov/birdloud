@@ -9,6 +9,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().url().default("redis://localhost:6379"),
   BETTER_AUTH_SECRET: z.string().min(16).default("replace-with-local-development-secret"),
   BETTER_AUTH_URL: z.string().url().default("http://localhost:4000"),
+  BIRDLOUD_HASH_SECRET: z.string().min(16).default("replace-with-local-hash-secret"),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   TURNSTILE_SECRET_KEY: z.string().optional()
 });

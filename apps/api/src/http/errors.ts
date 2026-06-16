@@ -19,6 +19,18 @@ export function forbidden(message: string): ApiError {
   return new ApiError(403, "FORBIDDEN", message);
 }
 
+export function unauthorized(message: string): ApiError {
+  return new ApiError(401, "AUTH_REQUIRED", message);
+}
+
+export function conflict(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {}
+): ApiError {
+  return new ApiError(409, code, message, details);
+}
+
 export function badRequest(message: string, details: Record<string, unknown> = {}): ApiError {
   return new ApiError(400, "BAD_REQUEST", message, details);
 }

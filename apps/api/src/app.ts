@@ -7,10 +7,13 @@ import { prisma } from "./lib/prisma.js";
 import { registerOpenApi } from "./plugins/openapi.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerOrganizerRoutes } from "./routes/organizer.js";
+import { registerVotingRoutes } from "./routes/voting.js";
 import { PrismaOrganizerService, type OrganizerService } from "./services/organizer.js";
+import { PrismaVotingService, type VotingService } from "./services/voting.js";
 
 export type BuildAppOptions = {
   organizerService?: OrganizerService;
+  votingService?: VotingService;
 };
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -36,6 +39,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     app,
     options.organizerService ?? new PrismaOrganizerService(prisma)
   );
+  await registerVotingRoutes(app, options.votingService ?? new PrismaVotingService(prisma));
 
   return app;
 }
