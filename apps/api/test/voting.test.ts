@@ -295,4 +295,107 @@ describe("voting routes", () => {
 
     await app.close();
   });
+
+  it("reports campaign results and integrity context", async () => {
+    const organizer = new MemoryOrganizerService();
+    const voting = new MemoryVotingService(organizer);
+    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const { campaign, option } = await createActiveCampaign(organizer);
+
+    const countedResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        optionId: option.id,
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          email: "counted@example.com"
+        }
+      }
+    });
+
+    expect(countedResponse.statusCode).toBe(201);
+
+    const reviewResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        optionId: option.id,
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          email: "reviewed@example.com"
+        }
+      }
+    });
+    voting.markVoteUnderReview(reviewResponse.json().voteId, "many_votes_from_same_device");
+
+    await app.inject({
+      method: "POST",
+      url: `/api/organizer/campaigns/${campaign.id}/review/${reviewResponse.json().voteId}/reject`,
+      headers: headers()
+    });
+
+    const duplicateResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        optionId: option.id,
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          email: "counted@example.com"
+        }
+      }
+    });
+
+    expect(duplicateResponse.statusCode).toBe(409);
+
+    const resultsResponse = await app.inject({
+      method: "GET",
+      url: `/api/organizer/campaigns/${campaign.id}/results`,
+      headers: headers()
+    });
+
+    expect(resultsResponse.statusCode).toBe(200);
+    expect(resultsResponse.json()).toMatchObject({
+      campaignId: campaign.id,
+      countedVotes: 1,
+      rejectedVotes: 1,
+      duplicateAttempts: 1,
+      mediumConfidenceVotes: 1,
+      lowConfidenceVotes: 1
+    });
+    expect(resultsResponse.json().integrityScore).toBeLessThan(100);
+    expect(resultsResponse.json().options[0]).toMatchObject({
+      optionId: option.id,
+      label: "Candidate A",
+      countedVotes: 1,
+      rejectedVotes: 1
+    });
+
+    const integrityResponse = await app.inject({
+      method: "GET",
+      url: `/api/organizer/campaigns/${campaign.id}/integrity`,
+      headers: headers()
+    });
+
+    expect(integrityResponse.statusCode).toBe(200);
+    expect(integrityResponse.json()).toMatchObject({
+      campaignId: campaign.id,
+      countedVotes: 1,
+      rejectedVotes: 1,
+      duplicateAttempts: 1
+    });
+    expect(integrityResponse.json().signals).toContainEqual(
+      expect.objectContaining({
+        code: "duplicate_attempts",
+        value: 1,
+        severity: "warning"
+      })
+    );
+
+    await app.close();
+  });
 });

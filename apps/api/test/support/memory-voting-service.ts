@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { forbidden, notFound, conflict, ApiError, badRequest } from "../../src/http/errors.js";
 import type {
+  CampaignIntegrityDto,
+  CampaignResultsDto,
   IssuedTokenDto,
   PublicCampaignDto,
   ReceiptStatusDto,
@@ -38,6 +40,7 @@ type StoredVote = {
 export class MemoryVotingService implements VotingService {
   readonly tokens = new Map<string, StoredToken>();
   readonly votes = new Map<string, StoredVote>();
+  readonly attempts: Array<{ campaignId: string; outcome: "blocked" | "duplicate" | "invalid" }> = [];
   readonly idempotency = new Map<string, { request: string; statusCode: number; body: VoteResponseDto }>();
 
   constructor(private readonly organizer: MemoryOrganizerService) {}
@@ -170,6 +173,10 @@ export class MemoryVotingService implements VotingService {
         (vote) => vote.campaignId === campaignId && vote.identityKey === identityKey
       )
     ) {
+      this.attempts.push({
+        campaignId,
+        outcome: "duplicate"
+      });
       throw conflict("ALREADY_VOTED", "A vote has already been submitted for this campaign.");
     }
 
@@ -273,6 +280,58 @@ export class MemoryVotingService implements VotingService {
     return this.resolveReviewVote(organizerId, campaignId, voteId, "rejected");
   }
 
+  async getCampaignResults(
+    organizerId: string,
+    campaignId: string
+  ): Promise<CampaignResultsDto> {
+    this.ensureOwnedCampaign(organizerId, campaignId);
+    const campaign = this.organizer.campaigns.get(campaignId);
+    const stats = this.buildStats(campaignId);
+
+    return {
+      campaignId,
+      status: campaign?.status ?? "draft",
+      ...stats
+    };
+  }
+
+  async getCampaignIntegrity(
+    organizerId: string,
+    campaignId: string
+  ): Promise<CampaignIntegrityDto> {
+    this.ensureOwnedCampaign(organizerId, campaignId);
+    const stats = this.buildStats(campaignId);
+
+    return {
+      campaignId,
+      integrityScore: stats.integrityScore,
+      countedVotes: stats.countedVotes,
+      delayedVotes: stats.delayedVotes,
+      underReviewVotes: stats.underReviewVotes,
+      blockedVotes: stats.blockedVotes,
+      rejectedVotes: stats.rejectedVotes,
+      blockedAttempts: stats.blockedAttempts,
+      duplicateAttempts: stats.duplicateAttempts,
+      highConfidenceVotes: stats.highConfidenceVotes,
+      mediumConfidenceVotes: stats.mediumConfidenceVotes,
+      lowConfidenceVotes: stats.lowConfidenceVotes,
+      signals: [
+        {
+          code: "under_review_votes",
+          label: "Votes waiting for review",
+          value: stats.underReviewVotes,
+          severity: stats.underReviewVotes > 0 ? "warning" : "info"
+        },
+        {
+          code: "duplicate_attempts",
+          label: "Duplicate vote attempts",
+          value: stats.duplicateAttempts,
+          severity: stats.duplicateAttempts > 0 ? "warning" : "info"
+        }
+      ]
+    };
+  }
+
   markVoteUnderReview(voteId: string, reason = "many_votes_from_same_device"): void {
     const vote = this.votes.get(voteId);
 
@@ -330,6 +389,67 @@ export class MemoryVotingService implements VotingService {
       reviewReason: vote.reviewReason,
       createdAt: vote.createdAt,
       reviewedAt: vote.reviewedAt
+    };
+  }
+
+  private buildStats(campaignId: string): Omit<CampaignResultsDto, "campaignId" | "status"> {
+    const votes = [...this.votes.values()].filter((vote) => vote.campaignId === campaignId);
+    const duplicateAttempts = this.attempts.filter(
+      (attempt) => attempt.campaignId === campaignId && attempt.outcome === "duplicate"
+    ).length;
+    const blockedAttempts = this.attempts.filter(
+      (attempt) => attempt.campaignId === campaignId && attempt.outcome === "blocked"
+    ).length;
+    const options = [...this.organizer.options.values()]
+      .filter((option) => option.campaignId === campaignId)
+      .sort((first, second) => first.position - second.position)
+      .map((option) => {
+        const optionVotes = votes.filter((vote) => vote.optionId === option.id);
+
+        return {
+          optionId: option.id,
+          label: option.label,
+          countedVotes: optionVotes.filter((vote) => vote.status === "counted").length,
+          delayedVotes: optionVotes.filter((vote) => vote.status === "delayed").length,
+          underReviewVotes: optionVotes.filter((vote) => vote.status === "under_review").length,
+          rejectedVotes: optionVotes.filter((vote) => vote.status === "rejected").length
+        };
+      });
+    const countedVotes = votes.filter((vote) => vote.status === "counted").length;
+    const delayedVotes = votes.filter((vote) => vote.status === "delayed").length;
+    const underReviewVotes = votes.filter((vote) => vote.status === "under_review").length;
+    const rejectedVotes = votes.filter((vote) => vote.status === "rejected").length;
+    const lowConfidenceVotes = votes.filter((vote) => vote.confidenceLevel === "low").length;
+    const totalSignals =
+      countedVotes + delayedVotes + underReviewVotes + rejectedVotes + duplicateAttempts + blockedAttempts;
+    const integrityScore =
+      totalSignals === 0
+        ? 100
+        : Math.max(
+            0,
+            Math.round(
+              100 -
+                (underReviewVotes / totalSignals) * 25 -
+                (rejectedVotes / totalSignals) * 20 -
+                (duplicateAttempts / totalSignals) * 15 -
+                (blockedAttempts / totalSignals) * 20 -
+                (lowConfidenceVotes / Math.max(1, votes.length)) * 15
+            )
+          );
+
+    return {
+      countedVotes,
+      delayedVotes,
+      underReviewVotes,
+      blockedVotes: votes.filter((vote) => vote.status === "blocked").length,
+      rejectedVotes,
+      blockedAttempts,
+      duplicateAttempts,
+      highConfidenceVotes: votes.filter((vote) => vote.confidenceLevel === "high").length,
+      mediumConfidenceVotes: votes.filter((vote) => vote.confidenceLevel === "medium").length,
+      lowConfidenceVotes,
+      integrityScore,
+      options
     };
   }
 }

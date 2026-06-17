@@ -91,6 +91,28 @@ export async function registerVotingRoutes(
       })
   );
 
+  app.get(
+    "/api/organizer/campaigns/:campaignId/results",
+    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const organizerId = getOrganizerId(request);
+        const { campaignId } = parseParams(request);
+        return service.getCampaignResults(organizerId, requireParam(campaignId, "campaignId"));
+      })
+  );
+
+  app.get(
+    "/api/organizer/campaigns/:campaignId/integrity",
+    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const organizerId = getOrganizerId(request);
+        const { campaignId } = parseParams(request);
+        return service.getCampaignIntegrity(organizerId, requireParam(campaignId, "campaignId"));
+      })
+  );
+
   app.post(
     "/api/organizer/campaigns/:campaignId/review/:voteId/approve",
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
