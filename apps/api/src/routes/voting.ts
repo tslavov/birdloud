@@ -7,6 +7,7 @@ import type { VotingService } from "../services/voting.js";
 const uuidParamSchema = z.object({
   campaignId: z.string().uuid().optional(),
   tokenId: z.string().uuid().optional(),
+  voteId: z.string().uuid().optional(),
   receipt: z.string().min(1).optional()
 });
 
@@ -76,6 +77,47 @@ export async function registerVotingRoutes(
           requireParam(tokenId, "tokenId")
         );
         return reply.status(204).send();
+      })
+  );
+
+  app.get(
+    "/api/organizer/campaigns/:campaignId/review",
+    { schema: { tags: ["organizer"], response: { 200: { type: "array", items: genericObjectSchema } } } },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const organizerId = getOrganizerId(request);
+        const { campaignId } = parseParams(request);
+        return service.listReviewVotes(organizerId, requireParam(campaignId, "campaignId"));
+      })
+  );
+
+  app.post(
+    "/api/organizer/campaigns/:campaignId/review/:voteId/approve",
+    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const organizerId = getOrganizerId(request);
+        const { campaignId, voteId } = parseParams(request);
+        return service.approveReviewVote(
+          organizerId,
+          requireParam(campaignId, "campaignId"),
+          requireParam(voteId, "voteId")
+        );
+      })
+  );
+
+  app.post(
+    "/api/organizer/campaigns/:campaignId/review/:voteId/reject",
+    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const organizerId = getOrganizerId(request);
+        const { campaignId, voteId } = parseParams(request);
+        return service.rejectReviewVote(
+          organizerId,
+          requireParam(campaignId, "campaignId"),
+          requireParam(voteId, "voteId")
+        );
       })
   );
 

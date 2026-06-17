@@ -212,5 +212,87 @@ describe("voting routes", () => {
 
     await app.close();
   });
-});
 
+  it("lists and resolves under-review votes", async () => {
+    const organizer = new MemoryOrganizerService();
+    const voting = new MemoryVotingService(organizer);
+    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const { campaign, option } = await createActiveCampaign(organizer);
+
+    const firstVoteResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        optionId: option.id,
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          email: "review-me@example.com"
+        }
+      }
+    });
+    voting.markVoteUnderReview(firstVoteResponse.json().voteId);
+
+    const secondVoteResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        optionId: option.id,
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          email: "reject-me@example.com"
+        }
+      }
+    });
+    voting.markVoteUnderReview(secondVoteResponse.json().voteId, "abnormal_submission_speed");
+
+    const reviewResponse = await app.inject({
+      method: "GET",
+      url: `/api/organizer/campaigns/${campaign.id}/review`,
+      headers: headers()
+    });
+
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(reviewResponse.json()).toHaveLength(2);
+    expect(reviewResponse.json()[0]).toMatchObject({
+      status: "under_review",
+      confidenceLevel: "low",
+      riskScore: 45
+    });
+
+    const approveResponse = await app.inject({
+      method: "POST",
+      url: `/api/organizer/campaigns/${campaign.id}/review/${firstVoteResponse.json().voteId}/approve`,
+      headers: headers()
+    });
+
+    expect(approveResponse.statusCode).toBe(200);
+    expect(approveResponse.json()).toMatchObject({
+      status: "counted",
+      reviewedAt: expect.any(String)
+    });
+
+    const rejectResponse = await app.inject({
+      method: "POST",
+      url: `/api/organizer/campaigns/${campaign.id}/review/${secondVoteResponse.json().voteId}/reject`,
+      headers: headers()
+    });
+
+    expect(rejectResponse.statusCode).toBe(200);
+    expect(rejectResponse.json()).toMatchObject({
+      status: "rejected",
+      reviewReason: "abnormal_submission_speed"
+    });
+
+    const emptyReviewResponse = await app.inject({
+      method: "GET",
+      url: `/api/organizer/campaigns/${campaign.id}/review`,
+      headers: headers()
+    });
+
+    expect(emptyReviewResponse.json()).toHaveLength(0);
+
+    await app.close();
+  });
+});

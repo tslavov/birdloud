@@ -4,6 +4,8 @@ import type {
   IssuedTokenDto,
   PublicCampaignDto,
   ReceiptStatusDto,
+  ReviewResolutionDto,
+  ReviewVoteDto,
   SubmitVoteContext,
   SubmitVoteInput,
   TokenSummaryDto,
@@ -22,10 +24,15 @@ type StoredToken = {
 type StoredVote = {
   id: string;
   campaignId: string;
+  optionId: string;
   identityKey: string;
   receipt: string;
-  status: VoteResponseDto["status"];
+  status: "counted" | "delayed" | "under_review" | "blocked" | "rejected";
+  confidenceLevel: "high" | "medium" | "low";
+  riskScore: number;
+  reviewReason: string | null;
   createdAt: string;
+  reviewedAt: string | null;
 };
 
 export class MemoryVotingService implements VotingService {
@@ -185,10 +192,15 @@ export class MemoryVotingService implements VotingService {
     const vote: StoredVote = {
       id: randomUUID(),
       campaignId,
+      optionId: input.optionId,
       identityKey,
       receipt: `rcpt_${randomUUID()}`,
       status: "counted",
-      createdAt: new Date().toISOString()
+      confidenceLevel: input.inviteToken ? "high" : "medium",
+      riskScore: 0,
+      reviewReason: null,
+      createdAt: new Date().toISOString(),
+      reviewedAt: null
     };
     this.votes.set(vote.id, vote);
 
@@ -228,6 +240,52 @@ export class MemoryVotingService implements VotingService {
     };
   }
 
+  async listReviewVotes(organizerId: string, campaignId: string): Promise<ReviewVoteDto[]> {
+    this.ensureOwnedCampaign(organizerId, campaignId);
+
+    return [...this.votes.values()]
+      .filter((vote) => vote.campaignId === campaignId && vote.status === "under_review")
+      .map((vote) => ({
+        id: vote.id,
+        campaignId: vote.campaignId,
+        optionId: vote.optionId,
+        status: "under_review",
+        confidenceLevel: vote.confidenceLevel,
+        riskScore: vote.riskScore,
+        reviewReason: vote.reviewReason,
+        createdAt: vote.createdAt
+      }));
+  }
+
+  async approveReviewVote(
+    organizerId: string,
+    campaignId: string,
+    voteId: string
+  ): Promise<ReviewResolutionDto> {
+    return this.resolveReviewVote(organizerId, campaignId, voteId, "counted");
+  }
+
+  async rejectReviewVote(
+    organizerId: string,
+    campaignId: string,
+    voteId: string
+  ): Promise<ReviewResolutionDto> {
+    return this.resolveReviewVote(organizerId, campaignId, voteId, "rejected");
+  }
+
+  markVoteUnderReview(voteId: string, reason = "many_votes_from_same_device"): void {
+    const vote = this.votes.get(voteId);
+
+    if (!vote) {
+      throw new Error(`Vote ${voteId} was not found.`);
+    }
+
+    vote.status = "under_review";
+    vote.confidenceLevel = "low";
+    vote.riskScore = 45;
+    vote.reviewReason = reason;
+  }
+
   private ensureOwnedCampaign(organizerId: string, campaignId: string): void {
     const campaign = this.organizer.campaigns.get(campaignId);
 
@@ -241,5 +299,37 @@ export class MemoryVotingService implements VotingService {
       throw forbidden("You do not have access to this campaign.");
     }
   }
-}
 
+  private resolveReviewVote(
+    organizerId: string,
+    campaignId: string,
+    voteId: string,
+    status: "counted" | "rejected"
+  ): ReviewResolutionDto {
+    this.ensureOwnedCampaign(organizerId, campaignId);
+    const vote = this.votes.get(voteId);
+
+    if (!vote || vote.campaignId !== campaignId) {
+      throw notFound("Review vote was not found.");
+    }
+
+    if (vote.status !== "under_review") {
+      throw conflict("VOTE_NOT_UNDER_REVIEW", "Only under-review votes can be resolved.");
+    }
+
+    vote.status = status;
+    vote.reviewedAt = new Date().toISOString();
+
+    return {
+      id: vote.id,
+      campaignId: vote.campaignId,
+      optionId: vote.optionId,
+      status,
+      confidenceLevel: vote.confidenceLevel,
+      riskScore: vote.riskScore,
+      reviewReason: vote.reviewReason,
+      createdAt: vote.createdAt,
+      reviewedAt: vote.reviewedAt
+    };
+  }
+}

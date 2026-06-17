@@ -70,6 +70,22 @@ export type ReceiptStatusDto = {
   recordedAt: string;
 };
 
+export type ReviewVoteDto = {
+  id: string;
+  campaignId: string;
+  optionId: string;
+  status: "under_review";
+  confidenceLevel: "high" | "medium" | "low";
+  riskScore: number;
+  reviewReason: string | null;
+  createdAt: string;
+};
+
+export type ReviewResolutionDto = Omit<ReviewVoteDto, "status"> & {
+  status: "counted" | "rejected";
+  reviewedAt: string;
+};
+
 export type VotingService = {
   issueTokens(
     organizerId: string,
@@ -85,6 +101,9 @@ export type VotingService = {
     context: SubmitVoteContext
   ): Promise<{ statusCode: number; body: VoteResponseDto }>;
   verifyReceipt(campaignId: string, receipt: string): Promise<ReceiptStatusDto>;
+  listReviewVotes(organizerId: string, campaignId: string): Promise<ReviewVoteDto[]>;
+  approveReviewVote(organizerId: string, campaignId: string, voteId: string): Promise<ReviewResolutionDto>;
+  rejectReviewVote(organizerId: string, campaignId: string, voteId: string): Promise<ReviewResolutionDto>;
 };
 
 const providerToPrisma: Record<VoteIdentityInput["provider"], IdentityProvider> = {
@@ -348,6 +367,38 @@ export class PrismaVotingService implements VotingService {
       voteStatus: voteStatusToApi[vote.status],
       recordedAt: vote.createdAt.toISOString()
     };
+  }
+
+  async listReviewVotes(organizerId: string, campaignId: string): Promise<ReviewVoteDto[]> {
+    await this.findOwnedCampaign(organizerId, campaignId);
+
+    const votes = await this.prisma.vote.findMany({
+      where: {
+        campaignId,
+        status: "UNDER_REVIEW"
+      },
+      orderBy: {
+        createdAt: "asc"
+      }
+    });
+
+    return votes.map(mapReviewVote);
+  }
+
+  async approveReviewVote(
+    organizerId: string,
+    campaignId: string,
+    voteId: string
+  ): Promise<ReviewResolutionDto> {
+    return this.resolveReviewVote(organizerId, campaignId, voteId, "COUNTED", "vote_review_approved");
+  }
+
+  async rejectReviewVote(
+    organizerId: string,
+    campaignId: string,
+    voteId: string
+  ): Promise<ReviewResolutionDto> {
+    return this.resolveReviewVote(organizerId, campaignId, voteId, "REJECTED", "vote_review_rejected");
   }
 
   private async processVote(
@@ -748,6 +799,68 @@ export class PrismaVotingService implements VotingService {
     return campaign;
   }
 
+  private async resolveReviewVote(
+    organizerId: string,
+    campaignId: string,
+    voteId: string,
+    status: "COUNTED" | "REJECTED",
+    eventType: string
+  ): Promise<ReviewResolutionDto> {
+    await this.findOwnedCampaign(organizerId, campaignId);
+
+    const existing = await this.prisma.vote.findFirst({
+      where: {
+        id: voteId,
+        campaignId
+      }
+    });
+
+    if (!existing) {
+      throw notFound("Review vote was not found.");
+    }
+
+    if (existing.status !== "UNDER_REVIEW") {
+      throw conflict("VOTE_NOT_UNDER_REVIEW", "Only under-review votes can be resolved.");
+    }
+
+    const vote = await this.prisma.vote.update({
+      where: { id: voteId },
+      data: {
+        status,
+        reviewedAt: new Date()
+      }
+    });
+
+    await this.prisma.voteLedger.create({
+      data: {
+        voteId,
+        campaignId,
+        eventType,
+        payload: {
+          previousStatus: "under_review",
+          newStatus: voteStatusToApi[vote.status]
+        }
+      }
+    });
+
+    await this.audit(organizerId, eventType, {
+      campaignId,
+      voteId
+    });
+
+    return {
+      id: vote.id,
+      campaignId: vote.campaignId,
+      optionId: vote.optionId,
+      status: voteStatusToApi[vote.status] as ReviewResolutionDto["status"],
+      confidenceLevel: trustLevelToApi[vote.confidenceLevel],
+      riskScore: vote.riskScore,
+      reviewReason: vote.reviewReason,
+      createdAt: vote.createdAt.toISOString(),
+      reviewedAt: vote.reviewedAt?.toISOString() ?? new Date().toISOString()
+    };
+  }
+
   private async audit(
     organizerId: string,
     action: string,
@@ -763,4 +876,26 @@ export class PrismaVotingService implements VotingService {
 
     await this.prisma.auditLog.create({ data });
   }
+}
+
+function mapReviewVote(vote: {
+  id: string;
+  campaignId: string;
+  optionId: string;
+  status: VoteStatus;
+  confidenceLevel: TrustLevel;
+  riskScore: number;
+  reviewReason: string | null;
+  createdAt: Date;
+}): ReviewVoteDto {
+  return {
+    id: vote.id,
+    campaignId: vote.campaignId,
+    optionId: vote.optionId,
+    status: "under_review",
+    confidenceLevel: trustLevelToApi[vote.confidenceLevel],
+    riskScore: vote.riskScore,
+    reviewReason: vote.reviewReason,
+    createdAt: vote.createdAt.toISOString()
+  };
 }
