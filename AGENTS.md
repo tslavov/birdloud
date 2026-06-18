@@ -36,6 +36,21 @@ Build for:
 - Results endpoint.
 - Integrity score.
 
+## Current Implementation Priorities
+
+The repo currently has an MVP backend foundation, but several core V1 pieces are still placeholders or missing. Prioritize work in this order unless the user explicitly redirects:
+
+- Replace the temporary `x-birdloud-organizer-id` development header with Better Auth session-based organizer/admin authorization.
+- Add Prisma migrations and a reliable local database setup/seed workflow.
+- Add real email magic-link voter verification and/or OAuth identity linking.
+- Add Cloudflare Turnstile verification to public vote submission.
+- Use Redis for temporary abuse counters and risk-scoring signals.
+- Harden invite-token claiming, idempotency, and duplicate-vote prevention under concurrent submissions.
+- Normalize vote ledger event names to stable product event names.
+- Replace generic OpenAPI schemas with precise request/response contracts.
+- Build usable organizer and voter web flows.
+- Add load tests and operational hardening before production claims.
+
 ## Deferred Scope
 
 Do not build into V1 unless explicitly requested:

@@ -11,6 +11,31 @@ V1 focuses on making voting fast and simple for normal voters while making mass 
 - The backend prevents duplicate credentials, records vote attempts, returns receipts, and flags risky activity.
 - Organizers can review suspicious votes, view results, inspect integrity signals, and export aggregate reports.
 
+## Current Status
+
+BirdLoud is currently an MVP backend foundation, not a production-ready service.
+
+Implemented:
+
+- API scaffold, health check, OpenAPI shell, and Prisma schema.
+- Organizer election, campaign, and choice management.
+- Public campaign details and vote submission.
+- Email-based soft identity input.
+- Optional invite-token issuing, revocation, and use during voting.
+- Mandatory idempotency, receipts, vote attempts, vote ledger, review queue, results, integrity score, and aggregate JSON/CSV export.
+- Unit and route tests for the core backend behavior.
+
+Still required before production:
+
+- Real Better Auth route authorization instead of the temporary organizer header.
+- Real email magic-link verification and/or OAuth identity.
+- Cloudflare Turnstile verification on public vote submission.
+- Redis-backed abuse counters and stronger rate-limit signals.
+- Prisma migrations and database setup/seed workflow.
+- Concurrency hardening for invite-token claiming and duplicate submissions.
+- Precise OpenAPI request/response schemas.
+- Usable organizer and voter web flows.
+
 ## Current Stack
 
 - Monorepo: `apps/web` and `apps/api`
@@ -128,4 +153,3 @@ Read these before making larger changes:
 - [AGENTS.md](AGENTS.md)
 
 The implementation should stay inside the simple V1 scope unless a future task explicitly expands it.
-
