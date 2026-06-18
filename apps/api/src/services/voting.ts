@@ -9,6 +9,13 @@ import {
 } from "@prisma/client";
 import { ApiError, badRequest, conflict, forbidden, notFound } from "../http/errors.js";
 import { createOpaqueToken, hashValue, normalizeEmail } from "../lib/crypto.js";
+import {
+  buildCampaignStats,
+  buildIntegritySignals,
+  buildResultsCsv,
+  calculateIntegrityScore,
+  type CampaignStats
+} from "./voting-reporting.js";
 
 export type TokenSummaryDto = {
   active: number;
@@ -100,14 +107,7 @@ export type CampaignResultsDto = {
   mediumConfidenceVotes: number;
   lowConfidenceVotes: number;
   integrityScore: number;
-  options: Array<{
-    optionId: string;
-    label: string;
-    countedVotes: number;
-    delayedVotes: number;
-    underReviewVotes: number;
-    rejectedVotes: number;
-  }>;
+  options: CampaignStats["options"];
 };
 
 export type CampaignIntegrityDto = {
@@ -131,6 +131,15 @@ export type CampaignIntegrityDto = {
   }>;
 };
 
+export type CampaignExportFormat = "json" | "csv";
+
+export type CampaignExportDto = {
+  format: CampaignExportFormat;
+  filename: string;
+  contentType: string;
+  body: string;
+};
+
 export type VotingService = {
   issueTokens(
     organizerId: string,
@@ -151,6 +160,11 @@ export type VotingService = {
   rejectReviewVote(organizerId: string, campaignId: string, voteId: string): Promise<ReviewResolutionDto>;
   getCampaignResults(organizerId: string, campaignId: string): Promise<CampaignResultsDto>;
   getCampaignIntegrity(organizerId: string, campaignId: string): Promise<CampaignIntegrityDto>;
+  exportCampaignReport(
+    organizerId: string,
+    campaignId: string,
+    format: CampaignExportFormat
+  ): Promise<CampaignExportDto>;
 };
 
 const providerToPrisma: Record<VoteIdentityInput["provider"], IdentityProvider> = {
@@ -494,6 +508,42 @@ export class PrismaVotingService implements VotingService {
       mediumConfidenceVotes: stats.mediumConfidenceVotes,
       lowConfidenceVotes: stats.lowConfidenceVotes,
       signals: buildIntegritySignals(stats)
+    };
+  }
+
+  async exportCampaignReport(
+    organizerId: string,
+    campaignId: string,
+    format: CampaignExportFormat
+  ): Promise<CampaignExportDto> {
+    const [results, integrity] = await Promise.all([
+      this.getCampaignResults(organizerId, campaignId),
+      this.getCampaignIntegrity(organizerId, campaignId)
+    ]);
+    const generatedAt = new Date().toISOString();
+
+    if (format === "csv") {
+      return {
+        format,
+        filename: `birdloud-${campaignId}-results.csv`,
+        contentType: "text/csv; charset=utf-8",
+        body: buildResultsCsv(results)
+      };
+    }
+
+    return {
+      format,
+      filename: `birdloud-${campaignId}-results.json`,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify(
+        {
+          generatedAt,
+          results,
+          integrity
+        },
+        null,
+        2
+      )
     };
   }
 
@@ -1004,129 +1054,6 @@ export class PrismaVotingService implements VotingService {
       attempts
     );
   }
-}
-
-type CampaignStats = {
-  countedVotes: number;
-  delayedVotes: number;
-  underReviewVotes: number;
-  blockedVotes: number;
-  rejectedVotes: number;
-  blockedAttempts: number;
-  duplicateAttempts: number;
-  highConfidenceVotes: number;
-  mediumConfidenceVotes: number;
-  lowConfidenceVotes: number;
-  options: CampaignResultsDto["options"];
-};
-
-function buildCampaignStats(
-  options: Array<{ id: string; label: string }>,
-  votes: Array<{ optionId: string; status: VoteStatus; confidenceLevel: TrustLevel }>,
-  attempts: Array<{ outcome: AttemptOutcome }>
-): CampaignStats {
-  const stats: CampaignStats = {
-    countedVotes: 0,
-    delayedVotes: 0,
-    underReviewVotes: 0,
-    blockedVotes: 0,
-    rejectedVotes: 0,
-    blockedAttempts: 0,
-    duplicateAttempts: 0,
-    highConfidenceVotes: 0,
-    mediumConfidenceVotes: 0,
-    lowConfidenceVotes: 0,
-    options: options.map((option) => ({
-      optionId: option.id,
-      label: option.label,
-      countedVotes: 0,
-      delayedVotes: 0,
-      underReviewVotes: 0,
-      rejectedVotes: 0
-    }))
-  };
-  const optionStats = new Map(stats.options.map((option) => [option.optionId, option]));
-
-  for (const vote of votes) {
-    if (vote.status === "COUNTED") stats.countedVotes += 1;
-    if (vote.status === "DELAYED") stats.delayedVotes += 1;
-    if (vote.status === "UNDER_REVIEW") stats.underReviewVotes += 1;
-    if (vote.status === "BLOCKED") stats.blockedVotes += 1;
-    if (vote.status === "REJECTED") stats.rejectedVotes += 1;
-
-    if (vote.confidenceLevel === "HIGH") stats.highConfidenceVotes += 1;
-    if (vote.confidenceLevel === "MEDIUM") stats.mediumConfidenceVotes += 1;
-    if (vote.confidenceLevel === "LOW") stats.lowConfidenceVotes += 1;
-
-    const option = optionStats.get(vote.optionId);
-
-    if (option) {
-      if (vote.status === "COUNTED") option.countedVotes += 1;
-      if (vote.status === "DELAYED") option.delayedVotes += 1;
-      if (vote.status === "UNDER_REVIEW") option.underReviewVotes += 1;
-      if (vote.status === "REJECTED") option.rejectedVotes += 1;
-    }
-  }
-
-  for (const attempt of attempts) {
-    if (attempt.outcome === "BLOCKED") stats.blockedAttempts += 1;
-    if (attempt.outcome === "DUPLICATE") stats.duplicateAttempts += 1;
-  }
-
-  return stats;
-}
-
-function calculateIntegrityScore(stats: CampaignStats): number {
-  const totalSignals =
-    stats.countedVotes +
-    stats.delayedVotes +
-    stats.underReviewVotes +
-    stats.rejectedVotes +
-    stats.blockedAttempts +
-    stats.duplicateAttempts;
-
-  if (totalSignals === 0) {
-    return 100;
-  }
-
-  const penalty =
-    (stats.underReviewVotes / totalSignals) * 25 +
-    (stats.delayedVotes / totalSignals) * 15 +
-    (stats.rejectedVotes / totalSignals) * 20 +
-    (stats.blockedAttempts / totalSignals) * 20 +
-    (stats.duplicateAttempts / totalSignals) * 15 +
-    (stats.lowConfidenceVotes / Math.max(1, stats.countedVotes + stats.delayedVotes + stats.underReviewVotes)) * 15;
-
-  return Math.max(0, Math.round(100 - penalty));
-}
-
-function buildIntegritySignals(stats: CampaignStats): CampaignIntegrityDto["signals"] {
-  return [
-    {
-      code: "under_review_votes",
-      label: "Votes waiting for review",
-      value: stats.underReviewVotes,
-      severity: stats.underReviewVotes > 0 ? "warning" : "info"
-    },
-    {
-      code: "blocked_attempts",
-      label: "Blocked vote attempts",
-      value: stats.blockedAttempts,
-      severity: stats.blockedAttempts > 0 ? "warning" : "info"
-    },
-    {
-      code: "duplicate_attempts",
-      label: "Duplicate vote attempts",
-      value: stats.duplicateAttempts,
-      severity: stats.duplicateAttempts > 0 ? "warning" : "info"
-    },
-    {
-      code: "low_confidence_votes",
-      label: "Low-confidence votes",
-      value: stats.lowConfidenceVotes,
-      severity: stats.lowConfidenceVotes > 0 ? "critical" : "info"
-    }
-  ];
 }
 
 function mapCampaignStatus(status: CampaignStatus): CampaignResultsDto["status"] {

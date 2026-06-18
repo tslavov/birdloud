@@ -27,6 +27,10 @@ const submitVoteSchema = z.object({
   deviceId: z.string().trim().min(8).max(256).optional()
 });
 
+const exportQuerySchema = z.object({
+  format: z.enum(["json", "csv"]).default("json")
+});
+
 const genericObjectSchema = {
   type: "object",
   additionalProperties: true
@@ -110,6 +114,39 @@ export async function registerVotingRoutes(
         const organizerId = getOrganizerId(request);
         const { campaignId } = parseParams(request);
         return service.getCampaignIntegrity(organizerId, requireParam(campaignId, "campaignId"));
+      })
+  );
+
+  app.get(
+    "/api/organizer/campaigns/:campaignId/export",
+    {
+      schema: {
+        tags: ["organizer"],
+        response: {
+          200: genericObjectSchema
+        }
+      }
+    },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const organizerId = getOrganizerId(request);
+        const { campaignId } = parseParams(request);
+        const query = parseWithSchema(exportQuerySchema, request.query);
+        const exported = await service.exportCampaignReport(
+          organizerId,
+          requireParam(campaignId, "campaignId"),
+          query.format
+        );
+
+        reply
+          .header("content-disposition", `attachment; filename="${exported.filename}"`)
+          .type(exported.contentType);
+
+        if (exported.format === "json") {
+          return JSON.parse(exported.body) as unknown;
+        }
+
+        return exported.body;
       })
   );
 

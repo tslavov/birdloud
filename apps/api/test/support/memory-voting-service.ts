@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { forbidden, notFound, conflict, ApiError, badRequest } from "../../src/http/errors.js";
 import type {
+  CampaignExportDto,
+  CampaignExportFormat,
   CampaignIntegrityDto,
   CampaignResultsDto,
   IssuedTokenDto,
@@ -14,6 +16,7 @@ import type {
   VoteResponseDto,
   VotingService
 } from "../../src/services/voting.js";
+import { buildResultsCsv } from "../../src/services/voting-reporting.js";
 import { MemoryOrganizerService } from "./memory-organizer-service.js";
 
 type StoredToken = {
@@ -329,6 +332,35 @@ export class MemoryVotingService implements VotingService {
           severity: stats.duplicateAttempts > 0 ? "warning" : "info"
         }
       ]
+    };
+  }
+
+  async exportCampaignReport(
+    organizerId: string,
+    campaignId: string,
+    format: CampaignExportFormat
+  ): Promise<CampaignExportDto> {
+    const results = await this.getCampaignResults(organizerId, campaignId);
+    const integrity = await this.getCampaignIntegrity(organizerId, campaignId);
+
+    if (format === "csv") {
+      return {
+        format,
+        filename: `birdloud-${campaignId}-results.csv`,
+        contentType: "text/csv; charset=utf-8",
+        body: buildResultsCsv(results)
+      };
+    }
+
+    return {
+      format,
+      filename: `birdloud-${campaignId}-results.json`,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        results,
+        integrity
+      })
     };
   }
 

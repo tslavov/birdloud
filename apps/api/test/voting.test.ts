@@ -398,4 +398,59 @@ describe("voting routes", () => {
 
     await app.close();
   });
+
+  it("exports aggregate campaign reports as JSON and CSV without voter-level secrets", async () => {
+    const organizer = new MemoryOrganizerService();
+    const voting = new MemoryVotingService(organizer);
+    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const { campaign, option } = await createActiveCampaign(organizer);
+
+    const voteResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        optionId: option.id,
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          email: "export-voter@example.com"
+        }
+      }
+    });
+
+    const jsonResponse = await app.inject({
+      method: "GET",
+      url: `/api/organizer/campaigns/${campaign.id}/export?format=json`,
+      headers: headers()
+    });
+
+    expect(jsonResponse.statusCode).toBe(200);
+    expect(jsonResponse.headers["content-disposition"]).toContain(`${campaign.id}-results.json`);
+    expect(jsonResponse.json().results).toMatchObject({
+      campaignId: campaign.id,
+      countedVotes: 1
+    });
+    expect(jsonResponse.json().integrity).toMatchObject({
+      campaignId: campaign.id,
+      integrityScore: 100
+    });
+    expect(jsonResponse.body).not.toContain(voteResponse.json().receipt);
+    expect(jsonResponse.body).not.toContain("export-voter@example.com");
+
+    const csvResponse = await app.inject({
+      method: "GET",
+      url: `/api/organizer/campaigns/${campaign.id}/export?format=csv`,
+      headers: headers()
+    });
+
+    expect(csvResponse.statusCode).toBe(200);
+    expect(csvResponse.headers["content-type"]).toContain("text/csv");
+    expect(csvResponse.headers["content-disposition"]).toContain(`${campaign.id}-results.csv`);
+    expect(csvResponse.body).toContain("campaign_id,integrity_score,total_counted_votes");
+    expect(csvResponse.body).toContain(`${campaign.id},100,1,0,0,0,0,0,1,0,${option.id},Candidate A,1,0,0,0`);
+    expect(csvResponse.body).not.toContain(voteResponse.json().receipt);
+    expect(csvResponse.body).not.toContain("export-voter@example.com");
+
+    await app.close();
+  });
 });
