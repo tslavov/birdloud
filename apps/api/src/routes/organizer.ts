@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { requireOrganizer } from "../http/authorization.js";
 import { ApiError, sendApiError } from "../http/errors.js";
 import { parseWithSchema } from "../http/validation.js";
+import type { AuthService } from "../lib/auth.js";
 import type { OrganizerService } from "../services/organizer.js";
 
 const uuidParamSchema = z.object({
@@ -66,7 +68,8 @@ const genericArraySchema = {
 
 export async function registerOrganizerRoutes(
   app: FastifyInstance,
-  service: OrganizerService
+  service: OrganizerService,
+  authService: AuthService
 ): Promise<void> {
   app.post(
     "/api/organizer/elections",
@@ -80,7 +83,7 @@ export async function registerOrganizerRoutes(
     },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const body = parseWithSchema(createElectionSchema, request.body);
         const election = await service.createElection(organizerId, body);
         return reply.status(201).send(election);
@@ -99,7 +102,7 @@ export async function registerOrganizerRoutes(
     },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         return service.listElections(organizerId);
       })
   );
@@ -116,7 +119,7 @@ export async function registerOrganizerRoutes(
     },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         return service.getElection(organizerId, requireParam(electionId, "electionId"));
       })
@@ -134,7 +137,7 @@ export async function registerOrganizerRoutes(
     },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         const body = parseWithSchema(updateElectionSchema, request.body);
         return service.updateElection(organizerId, requireParam(electionId, "electionId"), body);
@@ -146,7 +149,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         return service.setElectionStatus(
           organizerId,
@@ -161,7 +164,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         return service.setElectionStatus(
           organizerId,
@@ -176,7 +179,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         return service.setElectionStatus(
           organizerId,
@@ -191,7 +194,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 201: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         const body = parseWithSchema(createCampaignSchema, request.body);
         const campaign = await service.createCampaign(
@@ -208,7 +211,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericArraySchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { electionId } = parseParams(request);
         return service.listCampaigns(organizerId, requireParam(electionId, "electionId"));
       })
@@ -219,7 +222,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.getCampaign(organizerId, requireParam(campaignId, "campaignId"));
       })
@@ -230,7 +233,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         const body = parseWithSchema(updateCampaignSchema, request.body);
         return service.updateCampaign(organizerId, requireParam(campaignId, "campaignId"), body);
@@ -242,7 +245,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.setCampaignStatus(
           organizerId,
@@ -257,7 +260,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.setCampaignStatus(
           organizerId,
@@ -272,7 +275,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 201: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         const body = parseWithSchema(createOptionSchema, request.body);
         const option = await service.createOption(
@@ -289,7 +292,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId, optionId } = parseParams(request);
         const body = parseWithSchema(updateOptionSchema, request.body);
         return service.updateOption(
@@ -306,7 +309,7 @@ export async function registerOrganizerRoutes(
     { schema: { tags: ["organizer"], response: { 204: { type: "null" } } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId, optionId } = parseParams(request);
         await service.deleteOption(
           organizerId,
@@ -326,18 +329,12 @@ async function handle<T>(reply: FastifyReply, action: () => Promise<T>): Promise
   }
 }
 
-function getOrganizerId(request: FastifyRequest): string {
-  const value = request.headers["x-birdloud-organizer-id"];
-
-  if (typeof value === "string" && z.string().uuid().safeParse(value).success) {
-    return value;
-  }
-
-  throw new ApiError(
-    401,
-    "AUTH_REQUIRED",
-    "Organizer authentication is required. Better Auth session resolution will replace this development header."
-  );
+async function getOrganizerId(
+  request: FastifyRequest,
+  authService: AuthService
+): Promise<string> {
+  const organizer = await requireOrganizer(request, authService);
+  return organizer.id;
 }
 
 function parseParams(request: FastifyRequest) {

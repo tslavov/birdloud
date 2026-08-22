@@ -40,8 +40,7 @@ Build for:
 
 The repo currently has an MVP backend foundation, but several core V1 pieces are still placeholders or missing. Prioritize work in this order unless the user explicitly redirects:
 
-- Replace the temporary `x-birdloud-organizer-id` development header with Better Auth session-based organizer/admin authorization.
-- Add Prisma migrations and a reliable local database setup/seed workflow.
+- Add Prisma migrations and a reliable local database setup/seed workflow, then validate the wired Better Auth session authorization against PostgreSQL.
 - Add real email magic-link voter verification and/or OAuth identity linking.
 - Add Cloudflare Turnstile verification to public vote submission.
 - Use Redis for temporary abuse counters and risk-scoring signals.

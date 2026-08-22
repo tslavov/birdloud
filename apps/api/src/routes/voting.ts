@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { requireOrganizer } from "../http/authorization.js";
 import { ApiError, sendApiError } from "../http/errors.js";
 import { parseWithSchema } from "../http/validation.js";
+import type { AuthService } from "../lib/auth.js";
 import type { VotingService } from "../services/voting.js";
 
 const uuidParamSchema = z.object({
@@ -38,14 +40,15 @@ const genericObjectSchema = {
 
 export async function registerVotingRoutes(
   app: FastifyInstance,
-  service: VotingService
+  service: VotingService,
+  authService: AuthService
 ): Promise<void> {
   app.post(
     "/api/organizer/campaigns/:campaignId/voter-tokens",
     { schema: { tags: ["organizer"], response: { 201: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         const body = parseWithSchema(issueTokensSchema, request.body);
         const result = await service.issueTokens(
@@ -62,7 +65,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.getTokenSummary(organizerId, requireParam(campaignId, "campaignId"));
       })
@@ -73,7 +76,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 204: { type: "null" } } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId, tokenId } = parseParams(request);
         await service.revokeToken(
           organizerId,
@@ -89,7 +92,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 200: { type: "array", items: genericObjectSchema } } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.listReviewVotes(organizerId, requireParam(campaignId, "campaignId"));
       })
@@ -100,7 +103,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.getCampaignResults(organizerId, requireParam(campaignId, "campaignId"));
       })
@@ -111,7 +114,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         return service.getCampaignIntegrity(organizerId, requireParam(campaignId, "campaignId"));
       })
@@ -129,7 +132,7 @@ export async function registerVotingRoutes(
     },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId } = parseParams(request);
         const query = parseWithSchema(exportQuerySchema, request.query);
         const exported = await service.exportCampaignReport(
@@ -155,7 +158,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId, voteId } = parseParams(request);
         return service.approveReviewVote(
           organizerId,
@@ -170,7 +173,7 @@ export async function registerVotingRoutes(
     { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
     async (request, reply) =>
       handle(reply, async () => {
-        const organizerId = getOrganizerId(request);
+        const organizerId = await getOrganizerId(request, authService);
         const { campaignId, voteId } = parseParams(request);
         return service.rejectReviewVote(
           organizerId,
@@ -236,18 +239,12 @@ async function handle<T>(reply: FastifyReply, action: () => Promise<T>): Promise
   }
 }
 
-function getOrganizerId(request: FastifyRequest): string {
-  const value = request.headers["x-birdloud-organizer-id"];
-
-  if (typeof value === "string" && z.string().uuid().safeParse(value).success) {
-    return value;
-  }
-
-  throw new ApiError(
-    401,
-    "AUTH_REQUIRED",
-    "Organizer authentication is required. Better Auth session resolution will replace this development header."
-  );
+async function getOrganizerId(
+  request: FastifyRequest,
+  authService: AuthService
+): Promise<string> {
+  const organizer = await requireOrganizer(request, authService);
+  return organizer.id;
 }
 
 function parseParams(request: FastifyRequest) {

@@ -3,13 +3,19 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MemoryOrganizerService } from "./support/memory-organizer-service.js";
 import { MemoryVotingService } from "./support/memory-voting-service.js";
+import { authenticatedAuthService } from "./support/test-auth-service.js";
 
 const organizerId = "00000000-0000-4000-8000-000000000001";
 
-function headers() {
-  return {
-    "x-birdloud-organizer-id": organizerId
-  };
+function buildVotingApp(
+  organizerService: MemoryOrganizerService,
+  votingService: MemoryVotingService
+) {
+  return buildApp({
+    authService: authenticatedAuthService(organizerId),
+    organizerService,
+    votingService
+  });
 }
 
 async function createActiveCampaign(organizer: MemoryOrganizerService) {
@@ -33,7 +39,7 @@ describe("voting routes", () => {
   it("returns public campaign details with active options", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign } = await createActiveCampaign(organizer);
 
     const response = await app.inject({
@@ -51,13 +57,12 @@ describe("voting routes", () => {
   it("issues, summarizes, and revokes invite tokens", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign } = await createActiveCampaign(organizer);
 
     const issueResponse = await app.inject({
       method: "POST",
       url: `/api/organizer/campaigns/${campaign.id}/voter-tokens`,
-      headers: headers(),
       payload: {
         count: 2,
         issuedLabel: "pilot list"
@@ -71,7 +76,6 @@ describe("voting routes", () => {
     const summaryResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/voter-tokens/summary`,
-      headers: headers()
     });
 
     expect(summaryResponse.statusCode).toBe(200);
@@ -80,7 +84,6 @@ describe("voting routes", () => {
     const revokeResponse = await app.inject({
       method: "POST",
       url: `/api/organizer/campaigns/${campaign.id}/voter-tokens/${issueResponse.json().tokens[0].id}/revoke`,
-      headers: headers()
     });
 
     expect(revokeResponse.statusCode).toBe(204);
@@ -88,7 +91,6 @@ describe("voting routes", () => {
     const updatedSummaryResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/voter-tokens/summary`,
-      headers: headers()
     });
 
     expect(updatedSummaryResponse.json().active).toBe(1);
@@ -100,13 +102,12 @@ describe("voting routes", () => {
   it("accepts a vote, replays idempotent retries, and verifies the receipt without option data", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
 
     const tokenResponse = await app.inject({
       method: "POST",
       url: `/api/organizer/campaigns/${campaign.id}/voter-tokens`,
-      headers: headers(),
       payload: {
         count: 1
       }
@@ -162,7 +163,7 @@ describe("voting routes", () => {
   it("blocks duplicate identity votes and idempotency conflicts", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
     const idempotencyKey = randomUUID();
 
@@ -216,7 +217,7 @@ describe("voting routes", () => {
   it("lists and resolves under-review votes", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
 
     const firstVoteResponse = await app.inject({
@@ -250,7 +251,6 @@ describe("voting routes", () => {
     const reviewResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/review`,
-      headers: headers()
     });
 
     expect(reviewResponse.statusCode).toBe(200);
@@ -264,7 +264,6 @@ describe("voting routes", () => {
     const approveResponse = await app.inject({
       method: "POST",
       url: `/api/organizer/campaigns/${campaign.id}/review/${firstVoteResponse.json().voteId}/approve`,
-      headers: headers()
     });
 
     expect(approveResponse.statusCode).toBe(200);
@@ -276,7 +275,6 @@ describe("voting routes", () => {
     const rejectResponse = await app.inject({
       method: "POST",
       url: `/api/organizer/campaigns/${campaign.id}/review/${secondVoteResponse.json().voteId}/reject`,
-      headers: headers()
     });
 
     expect(rejectResponse.statusCode).toBe(200);
@@ -288,7 +286,6 @@ describe("voting routes", () => {
     const emptyReviewResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/review`,
-      headers: headers()
     });
 
     expect(emptyReviewResponse.json()).toHaveLength(0);
@@ -299,7 +296,7 @@ describe("voting routes", () => {
   it("reports campaign results and integrity context", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
 
     const countedResponse = await app.inject({
@@ -334,7 +331,6 @@ describe("voting routes", () => {
     await app.inject({
       method: "POST",
       url: `/api/organizer/campaigns/${campaign.id}/review/${reviewResponse.json().voteId}/reject`,
-      headers: headers()
     });
 
     const duplicateResponse = await app.inject({
@@ -355,7 +351,6 @@ describe("voting routes", () => {
     const resultsResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/results`,
-      headers: headers()
     });
 
     expect(resultsResponse.statusCode).toBe(200);
@@ -378,7 +373,6 @@ describe("voting routes", () => {
     const integrityResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/integrity`,
-      headers: headers()
     });
 
     expect(integrityResponse.statusCode).toBe(200);
@@ -402,7 +396,7 @@ describe("voting routes", () => {
   it("exports aggregate campaign reports as JSON and CSV without voter-level secrets", async () => {
     const organizer = new MemoryOrganizerService();
     const voting = new MemoryVotingService(organizer);
-    const app = await buildApp({ organizerService: organizer, votingService: voting });
+    const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
 
     const voteResponse = await app.inject({
@@ -421,7 +415,6 @@ describe("voting routes", () => {
     const jsonResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/export?format=json`,
-      headers: headers()
     });
 
     expect(jsonResponse.statusCode).toBe(200);
@@ -440,7 +433,6 @@ describe("voting routes", () => {
     const csvResponse = await app.inject({
       method: "GET",
       url: `/api/organizer/campaigns/${campaign.id}/export?format=csv`,
-      headers: headers()
     });
 
     expect(csvResponse.statusCode).toBe(200);

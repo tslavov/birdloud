@@ -18,6 +18,7 @@ BirdLoud is currently an MVP backend foundation, not a production-ready service.
 Implemented:
 
 - API scaffold, health check, OpenAPI shell, and Prisma schema.
+- Better Auth endpoints and session-based organizer/admin route authorization.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Email-based soft identity input.
@@ -27,7 +28,7 @@ Implemented:
 
 Still required before production:
 
-- Real Better Auth route authorization instead of the temporary organizer header.
+- Database migrations plus an end-to-end Better Auth sign-up/sign-in/session workflow.
 - Real email magic-link verification and/or OAuth identity.
 - Cloudflare Turnstile verification on public vote submission.
 - Redis-backed abuse counters and stronger rate-limit signals.
