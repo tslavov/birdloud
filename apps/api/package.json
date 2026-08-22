@@ -9,9 +9,15 @@
     "start": "node dist/server.js",
     "check": "prisma generate && tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "prisma:generate": "prisma generate",
-    "prisma:format": "prisma format"
+    "prisma:format": "prisma format",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:deploy:test": "prisma migrate deploy --config prisma.test.config.ts",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

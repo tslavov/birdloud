@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: birdloud
+      POSTGRES_USER: birdloud
+      POSTGRES_PASSWORD: birdloud
+    ports:
+      - "5432:5432"
+    volumes:
+      - birdloud_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U birdloud -d birdloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: birdloud_test
+      POSTGRES_USER: birdloud
+      POSTGRES_PASSWORD: birdloud
+    ports:
+      - "5433:5432"
+    volumes:
+      - birdloud_postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U birdloud -d birdloud_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  birdloud_postgres_data:
+  birdloud_postgres_test_data:

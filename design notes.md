@@ -76,6 +76,7 @@ Implemented:
 - React Router 7 web scaffold with Tailwind and shadcn-style UI primitives.
 - Fastify API scaffold with Helmet, CORS, rate limiting plugin registration, OpenAPI/Swagger, and health route.
 - Better Auth endpoints and session-based organizer/admin route authorization.
+- Baseline Prisma migration, an isolated Docker development/test database workflow, a production-guarded synthetic seed, and a PostgreSQL-backed Better Auth session integration test.
 - Prisma schema for users, auth sessions/accounts, elections, campaigns, options, voter identities, tokens, votes, attempts, ledger, idempotency, identity events, conflicts, counts, and audit logs.
 - Organizer election, campaign, and option management endpoints.
 - Public campaign details endpoint.
@@ -91,33 +92,30 @@ Implemented:
 
 Important implementation shortcuts still present:
 
-- Better Auth endpoints and session authorization are wired, but migrations and an end-to-end database-backed sign-up/sign-in/session test are still missing.
 - Public voter identity is currently direct email input, not a real email magic-link verification flow.
 - OAuth providers are not wired yet.
 - Cloudflare Turnstile verification is not wired into vote submission yet.
 - Redis is configured but not actively used for abuse counters or rate-limit state.
-- There are no Prisma migrations or database seed scripts committed yet.
 - API schemas in OpenAPI are still generic and need precise request/response contracts.
 - The web app is still a static shell, not a usable organizer or voter UI.
 - Vote ledger event names in implementation are not yet fully normalized to the planned product event names.
 - Invite-token claiming currently checks then updates; before production it should be made atomic under concurrency.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
-Architectural read: the backend is now a good prototype/MVP foundation, but it is not production-ready until database-backed auth, verified voter identity, bot protection, migrations, and concurrency hardening are done.
+Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup and tested organizer sessions, but it is not production-ready until verified voter identity, bot protection, Redis signals, and concurrency hardening are done.
 
 ## Remaining Core Work
 
 The next core work should happen in this order:
 
-1. Add Prisma migrations and a reliable local database workflow, then validate Better Auth sign-up, sign-in, and session resolution end to end.
-2. Add real email magic-link voter verification or clearly rename the current email identity mode as unverified email identity.
-3. Add Cloudflare Turnstile verification to `POST /api/campaigns/:campaignId/votes`.
-4. Use Redis for vote abuse counters and rate-limit signals that feed risk scoring.
-5. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
-6. Normalize ledger event names to the product event catalog.
-7. Add precise OpenAPI schemas for all request and response bodies.
-8. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-9. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+1. Add real email magic-link voter verification or clearly rename the current email identity mode as unverified email identity.
+2. Add Cloudflare Turnstile verification to `POST /api/campaigns/:campaignId/votes`.
+3. Use Redis for vote abuse counters and rate-limit signals that feed risk scoring.
+4. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
+5. Normalize ledger event names to the product event catalog.
+6. Add precise OpenAPI schemas for all request and response bodies.
+7. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
+8. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
 
 Deferred but already modeled:
 

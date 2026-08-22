@@ -19,6 +19,7 @@ Implemented:
 
 - API scaffold, health check, OpenAPI shell, and Prisma schema.
 - Better Auth endpoints and session-based organizer/admin route authorization.
+- Baseline Prisma migration, Docker-based PostgreSQL/Redis setup, safe synthetic seed, and database-backed auth integration test.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Email-based soft identity input.
@@ -28,11 +29,9 @@ Implemented:
 
 Still required before production:
 
-- Database migrations plus an end-to-end Better Auth sign-up/sign-in/session workflow.
 - Real email magic-link verification and/or OAuth identity.
 - Cloudflare Turnstile verification on public vote submission.
 - Redis-backed abuse counters and stronger rate-limit signals.
-- Prisma migrations and database setup/seed workflow.
 - Concurrency hardening for invite-token claiming and duplicate submissions.
 - Precise OpenAPI request/response schemas.
 - Usable organizer and voter web flows.
@@ -52,17 +51,22 @@ Still required before production:
 Requirements:
 
 - Node.js `>=20.11.0`
-- PostgreSQL
-- Redis
+- Docker Desktop (recommended for the included PostgreSQL and Redis services)
 
 Setup:
 
 ```bash
 npm install
-cp .env.example .env
+cp apps/api/.env.example apps/api/.env
+npm run infra:up
+npm run db:deploy
+npm run db:deploy:test
+npm run db:seed
 ```
 
 Use safe local values in `.env`. Do not commit real secrets, production database URLs, OAuth secrets, Turnstile secrets, real tokens, or voter data.
+
+The compose setup exposes the development database on port `5432`, an isolated integration-test database on port `5433`, and Redis on port `6379`. The seed is refused in production and creates only synthetic `.example.test` data. Override `SEED_ORGANIZER_EMAIL` and `SEED_ORGANIZER_PASSWORD` in your ignored local `.env` when needed.
 
 Run the apps:
 
@@ -78,7 +82,14 @@ npm run test
 npm run build
 npm run validate
 npm run prisma:generate
+npm run db:migrate
+npm run db:deploy:test
+npm run db:seed
+npm run test:integration
+npm run infra:down
 ```
+
+`npm run test:integration` targets `TEST_DATABASE_URL` when set and otherwise uses the isolated compose database on port `5433`. Run `npm run db:deploy:test` before the first integration test.
 
 ## API Usage
 
