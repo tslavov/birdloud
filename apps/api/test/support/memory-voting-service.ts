@@ -116,6 +116,10 @@ export class MemoryVotingService implements VotingService {
       throw conflict("TOKEN_ALREADY_USED", "Used voter tokens cannot be revoked.");
     }
 
+    if (token.status !== "active") {
+      throw conflict("TOKEN_NOT_ACTIVE", "Only active voter tokens can be revoked.");
+    }
+
     token.status = "revoked";
   }
 

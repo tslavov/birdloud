@@ -25,6 +25,7 @@ import {
   type CampaignStats
 } from "./voting-reporting.js";
 import type { TurnstileVerifier } from "./turnstile.js";
+import { VOTE_LEDGER_EVENT, VOTE_LEDGER_EVENT_VERSION } from "./vote-ledger-events.js";
 import type { VoterEmailSender } from "./voter-email.js";
 
 export type TokenSummaryDto = {
@@ -211,6 +212,8 @@ const trustLevelToApi: Record<TrustLevel, VoteResponseDto["confidenceLevel"]> = 
 const recentIpSubmissionThreshold = 8;
 const recentDeviceSubmissionThreshold = 4;
 const recentFailureThreshold = 5;
+const reviewRiskThreshold = 40;
+const blockRiskThreshold = 80;
 
 export class PrismaVotingService implements VotingService {
   constructor(
@@ -287,42 +290,67 @@ export class PrismaVotingService implements VotingService {
   async revokeToken(organizerId: string, campaignId: string, tokenId: string): Promise<void> {
     await this.findOwnedCampaign(organizerId, campaignId);
 
-    const token = await this.prisma.voterToken.findFirst({
-      where: {
-        id: tokenId,
-        campaignId
-      }
-    });
-
-    if (!token) {
-      throw notFound("Voter token was not found.");
-    }
-
-    if (token.status === TokenStatus.USED) {
-      throw conflict("TOKEN_ALREADY_USED", "Used voter tokens cannot be revoked.");
-    }
-
-    await this.prisma.voterToken.update({
-      where: { id: tokenId },
-      data: {
-        status: TokenStatus.REVOKED,
-        revokedAt: new Date()
-      }
-    });
-
-    await this.prisma.voteLedger.create({
-      data: {
-        campaignId,
-        eventType: "token_revoked",
-        payload: {
-          tokenId
+    await this.prisma.$transaction(async (tx) => {
+      const token = await tx.voterToken.findFirst({
+        where: {
+          id: tokenId,
+          campaignId
         }
-      }
-    });
+      });
 
-    await this.audit(organizerId, "voter_token.revoked", {
-      campaignId,
-      tokenId
+      if (!token) {
+        throw notFound("Voter token was not found.");
+      }
+
+      if (token.status === TokenStatus.USED) {
+        throw conflict("TOKEN_ALREADY_USED", "Used voter tokens cannot be revoked.");
+      }
+
+      if (token.status !== TokenStatus.ACTIVE) {
+        throw conflict("TOKEN_NOT_ACTIVE", "Only active voter tokens can be revoked.");
+      }
+
+      const revokedAt = new Date();
+      const revoked = await tx.voterToken.updateMany({
+        where: {
+          id: tokenId,
+          campaignId,
+          status: TokenStatus.ACTIVE
+        },
+        data: {
+          status: TokenStatus.REVOKED,
+          revokedAt
+        }
+      });
+
+      if (revoked.count !== 1) {
+        throw conflict("TOKEN_NOT_ACTIVE", "Only active voter tokens can be revoked.");
+      }
+
+      await tx.voteLedger.create({
+        data: {
+          campaignId,
+          eventType: VOTE_LEDGER_EVENT.TOKEN_REVOKED,
+          payload: {
+            eventVersion: VOTE_LEDGER_EVENT_VERSION,
+            tokenId,
+            status: "revoked"
+          }
+        }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId: organizerId,
+          campaignId,
+          action: VOTE_LEDGER_EVENT.TOKEN_REVOKED,
+          metadata: {
+            campaignId,
+            tokenId,
+            status: "revoked"
+          }
+        }
+      });
     });
   }
 
@@ -699,7 +727,7 @@ export class PrismaVotingService implements VotingService {
     campaignId: string,
     voteId: string
   ): Promise<ReviewResolutionDto> {
-    return this.resolveReviewVote(organizerId, campaignId, voteId, "COUNTED", "vote_review_approved");
+    return this.resolveReviewVote(organizerId, campaignId, voteId, "COUNTED", "approved");
   }
 
   async rejectReviewVote(
@@ -707,7 +735,7 @@ export class PrismaVotingService implements VotingService {
     campaignId: string,
     voteId: string
   ): Promise<ReviewResolutionDto> {
-    return this.resolveReviewVote(organizerId, campaignId, voteId, "REJECTED", "vote_review_rejected");
+    return this.resolveReviewVote(organizerId, campaignId, voteId, "REJECTED", "rejected");
   }
 
   async getCampaignResults(
@@ -872,7 +900,7 @@ export class PrismaVotingService implements VotingService {
       abuseSignals
     });
 
-    if (risk.score >= 80) {
+    if (risk.score >= blockRiskThreshold) {
       throw new ApiError(
         403,
         "VOTE_BLOCKED",
@@ -885,7 +913,9 @@ export class PrismaVotingService implements VotingService {
       );
     }
 
-    const voteStatus = risk.score >= 40 ? "UNDER_REVIEW" : "COUNTED";
+    // V1 sends medium-risk votes to human review. DELAYED remains reserved until
+    // a bounded, documented transition process can prevent votes from being stranded.
+    const voteStatus = risk.score >= reviewRiskThreshold ? "UNDER_REVIEW" : "COUNTED";
     const attemptOutcome =
       voteStatus === "UNDER_REVIEW" ? AttemptOutcome.UNDER_REVIEW : AttemptOutcome.COUNTED;
     const receipt = createOpaqueToken("rcpt");
@@ -926,8 +956,13 @@ export class PrismaVotingService implements VotingService {
       data: {
         voteId: vote.id,
         campaignId,
-        eventType: voteStatus === "UNDER_REVIEW" ? "vote_placed_under_review" : "vote_counted",
+        eventType:
+          voteStatus === "UNDER_REVIEW"
+            ? VOTE_LEDGER_EVENT.VOTE_PLACED_UNDER_REVIEW
+            : VOTE_LEDGER_EVENT.VOTE_COUNTED,
         payload: {
+          eventVersion: VOTE_LEDGER_EVENT_VERSION,
+          status: voteStatusToApi[vote.status],
           confidenceLevel: trustLevelToApi[vote.confidenceLevel],
           riskScore: vote.riskScore,
           reasons: risk.reasons
@@ -1169,10 +1204,25 @@ export class PrismaVotingService implements VotingService {
           await tx.voteLedger.create({
             data: {
               campaignId,
-              eventType: "vote_blocked",
+              eventType: VOTE_LEDGER_EVENT.VOTE_BLOCKED,
               payload: {
+                eventVersion: VOTE_LEDGER_EVENT_VERSION,
+                status: "blocked",
                 reasons,
                 riskScore
+              }
+            }
+          });
+        }
+
+        if (error.code === "ALREADY_VOTED") {
+          await tx.voteLedger.create({
+            data: {
+              campaignId,
+              eventType: VOTE_LEDGER_EVENT.DUPLICATE_ATTEMPT_DETECTED,
+              payload: {
+                eventVersion: VOTE_LEDGER_EVENT_VERSION,
+                reason
               }
             }
           });
@@ -1453,61 +1503,98 @@ export class PrismaVotingService implements VotingService {
     campaignId: string,
     voteId: string,
     status: "COUNTED" | "REJECTED",
-    eventType: string
+    decision: "approved" | "rejected"
   ): Promise<ReviewResolutionDto> {
     await this.findOwnedCampaign(organizerId, campaignId);
 
-    const existing = await this.prisma.vote.findFirst({
-      where: {
-        id: voteId,
-        campaignId
-      }
-    });
-
-    if (!existing) {
-      throw notFound("Review vote was not found.");
-    }
-
-    if (existing.status !== "UNDER_REVIEW") {
-      throw conflict("VOTE_NOT_UNDER_REVIEW", "Only under-review votes can be resolved.");
-    }
-
-    const vote = await this.prisma.vote.update({
-      where: { id: voteId },
-      data: {
-        status,
-        reviewedAt: new Date()
-      }
-    });
-
-    await this.prisma.voteLedger.create({
-      data: {
-        voteId,
-        campaignId,
-        eventType,
-        payload: {
-          previousStatus: "under_review",
-          newStatus: voteStatusToApi[vote.status]
+    return this.prisma.$transaction(async (tx) => {
+      const reviewedAt = new Date();
+      const resolved = await tx.vote.updateMany({
+        where: {
+          id: voteId,
+          campaignId,
+          status: "UNDER_REVIEW"
+        },
+        data: {
+          status,
+          reviewedAt
         }
+      });
+
+      if (resolved.count !== 1) {
+        const existing = await tx.vote.findFirst({
+          where: {
+            id: voteId,
+            campaignId
+          }
+        });
+
+        if (!existing) {
+          throw notFound("Review vote was not found.");
+        }
+
+        throw conflict("VOTE_NOT_UNDER_REVIEW", "Only under-review votes can be resolved.");
       }
-    });
 
-    await this.audit(organizerId, eventType, {
-      campaignId,
-      voteId
-    });
+      const vote = await tx.vote.findUniqueOrThrow({ where: { id: voteId } });
+      const newStatus = voteStatusToApi[vote.status];
+      const outcomeEvent =
+        status === "COUNTED"
+          ? VOTE_LEDGER_EVENT.VOTE_COUNTED
+          : VOTE_LEDGER_EVENT.VOTE_REJECTED;
 
-    return {
-      id: vote.id,
-      campaignId: vote.campaignId,
-      optionId: vote.optionId,
-      status: voteStatusToApi[vote.status] as ReviewResolutionDto["status"],
-      confidenceLevel: trustLevelToApi[vote.confidenceLevel],
-      riskScore: vote.riskScore,
-      reviewReason: vote.reviewReason,
-      createdAt: vote.createdAt.toISOString(),
-      reviewedAt: vote.reviewedAt?.toISOString() ?? new Date().toISOString()
-    };
+      await tx.voteLedger.createMany({
+        data: [
+          {
+            voteId,
+            campaignId,
+            eventType: VOTE_LEDGER_EVENT.VOTE_REVIEWED,
+            payload: {
+              eventVersion: VOTE_LEDGER_EVENT_VERSION,
+              decision,
+              previousStatus: "under_review",
+              newStatus
+            }
+          },
+          {
+            voteId,
+            campaignId,
+            eventType: outcomeEvent,
+            payload: {
+              eventVersion: VOTE_LEDGER_EVENT_VERSION,
+              status: newStatus,
+              source: "organizer_review"
+            }
+          }
+        ]
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId: organizerId,
+          campaignId,
+          action: VOTE_LEDGER_EVENT.VOTE_REVIEWED,
+          metadata: {
+            campaignId,
+            voteId,
+            decision,
+            newStatus
+          }
+        }
+      });
+
+      return {
+        id: vote.id,
+        campaignId: vote.campaignId,
+        optionId: vote.optionId,
+        status: newStatus as ReviewResolutionDto["status"],
+        confidenceLevel: trustLevelToApi[vote.confidenceLevel],
+        riskScore: vote.riskScore,
+        reviewReason: vote.reviewReason,
+        createdAt: vote.createdAt.toISOString(),
+        reviewedAt: vote.reviewedAt?.toISOString() ?? reviewedAt.toISOString()
+      };
+    });
   }
 
   private async audit(

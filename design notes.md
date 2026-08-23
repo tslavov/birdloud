@@ -81,6 +81,7 @@ Implemented:
 - Cloudflare Turnstile Siteverify enforcement outside the database transaction, with fail-closed provider handling, production hostname/action checks, durable failure attempts, and retry-safe vote idempotency.
 - Redis-backed expiring campaign/IP/device submission and failure counters, graceful outage degradation, and explainable burst/failure risk reasons.
 - Atomic invite-token claiming, transactionally completed idempotency records with stale-claim recovery, identity-scoped duplicate prevention, and PostgreSQL race coverage.
+- Versioned stable product ledger events, legacy event-name migration, atomic review/revocation transitions, and database lifecycle coverage for counted, review, blocked, rejected, and duplicate outcomes.
 - Prisma schema for users, auth sessions/accounts, elections, campaigns, options, voter identities, tokens, votes, attempts, ledger, idempotency, identity events, conflicts, counts, and audit logs.
 - Organizer election, campaign, and option management endpoints.
 - Public campaign details endpoint.
@@ -99,7 +100,6 @@ Important implementation shortcuts still present:
 - OAuth providers are not wired yet.
 - API schemas in OpenAPI are still generic and need precise request/response contracts.
 - The web app is still a static shell, not a usable organizer or voter UI.
-- Vote ledger event names in implementation are not yet fully normalized to the planned product event names.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
 Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, verified email identity, server-side bot protection, temporary Redis abuse signals, and database-backed concurrency protection, but it is not production-ready until contract, web-flow, and operational hardening are done.
@@ -108,10 +108,9 @@ Architectural read: the backend is now a good prototype/MVP foundation with repr
 
 The next core work should happen in this order:
 
-1. Normalize ledger event names to the product event catalog.
-2. Add precise OpenAPI schemas for all request and response bodies.
-3. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-4. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+1. Add precise OpenAPI schemas for all request and response bodies.
+2. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
+3. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
 
 Deferred but already modeled:
 
@@ -439,6 +438,8 @@ Example events:
 My thought: this is worth adding in V1. The regular `votes` table answers "what is the current state?" while the ledger answers "how did we get here?" That is exactly what voting systems need when something is disputed.
 
 The event names should be stable and product-level where possible. Internal implementation details can go into `payload`, but public-style event names like `vote.counted` and `campaign.closed` make future webhook support much easier.
+
+New V1 ledger payloads include `eventVersion: 1`. Existing pre-normalization rows keep their original payload shape, while the data migration converts their event names to this catalog.
 
 Important rule: never call organizer webhooks directly inside the vote transaction. Append the ledger event first, then let a background worker deliver webhooks from ledger events or a delivery queue.
 
@@ -1080,6 +1081,8 @@ Vote status should separate "received" from "counted":
 Normal votes should be counted quickly. Risky votes may be delayed or placed under review. Clearly abusive attempts should be blocked.
 
 Delayed votes should either become `counted` after short-lived risk checks pass or move to `under_review` if suspicious patterns persist.
+
+Current V1 implementation policy is explicit: risk scores below 40 are `counted`, scores from 40 through 79 are `under_review`, and scores of 80 or more are blocked before a countable vote is created. `delayed` remains modeled but is not emitted until a bounded transition process exists; this prevents votes from being stranded indefinitely.
 
 ### Duplicate and Mass-Manipulation Detection
 
@@ -1952,13 +1955,12 @@ Implementation has started. These are the remaining decisions and setup tasks be
    - `identity_conflicts`
    - `audit_logs`
 
-5. Define the vote status lifecycle.
-   - `counted`
-   - `delayed`
-   - `under_review`
-   - `blocked`
-   - `rejected`
-   - Decide when delayed votes automatically become counted or move to review.
+5. Keep the vote status lifecycle operational policy explicit.
+   - Risk score below 40: `counted`.
+   - Risk score 40-79: `under_review` in current V1.
+   - Risk score 80 or higher: blocked before a countable vote is created.
+   - `rejected`: organizer review rejected a previously recorded vote.
+   - `delayed`: reserved until an automatic counted/review transition is implemented.
 
 6. Define the first risk scoring rules.
    - Same credential already voted.

@@ -40,7 +40,6 @@ Build for:
 
 The repo currently has an MVP backend foundation, but several core V1 pieces are still placeholders or missing. Prioritize work in this order unless the user explicitly redirects:
 
-- Normalize vote ledger event names to stable product event names.
 - Replace generic OpenAPI schemas with precise request/response contracts.
 - Build usable organizer and voter web flows.
 - Add load tests and operational hardening before production claims.

@@ -24,6 +24,7 @@ Implemented:
 - Server-side Cloudflare Turnstile verification with timeout, production hostname/action checks, and durable failed-attempt logging.
 - Redis-backed short-lived IP/device submission and failure counters that feed explainable risk scoring without becoming authoritative.
 - Atomic invite-token claims, transactionally completed idempotency records, stale-claim recovery, and PostgreSQL concurrency tests for duplicate submissions.
+- Versioned, stable product ledger events with atomic review/revocation transitions and an explicit V1 counted/review/blocked risk policy.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
