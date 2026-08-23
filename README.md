@@ -23,6 +23,7 @@ Implemented:
 - Campaign-scoped email magic links delivered over SMTP, with hashed one-time challenges and vote proofs.
 - Server-side Cloudflare Turnstile verification with timeout, production hostname/action checks, and durable failed-attempt logging.
 - Redis-backed short-lived IP/device submission and failure counters that feed explainable risk scoring without becoming authoritative.
+- Atomic invite-token claims, transactionally completed idempotency records, stale-claim recovery, and PostgreSQL concurrency tests for duplicate submissions.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
@@ -32,7 +33,6 @@ Implemented:
 
 Still required before production:
 
-- Concurrency hardening for invite-token claiming and duplicate submissions.
 - Precise OpenAPI request/response schemas.
 - Usable organizer and voter web flows.
 

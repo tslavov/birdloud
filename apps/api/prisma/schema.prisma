@@ -378,11 +378,14 @@ model IdempotencyKey {
   responseBody Json?
   statusCode   Int?
   createdAt    DateTime          @default(now())
+  lockedAt     DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
   expiresAt    DateTime
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, key])
+  @@index([status, lockedAt])
   @@index([expiresAt])
   @@map("idempotency_keys")
 }

@@ -80,6 +80,7 @@ Implemented:
 - Campaign-scoped email magic-link delivery over SMTP, hashed one-time challenges, short-lived vote proofs, and PostgreSQL integration coverage for proof consumption.
 - Cloudflare Turnstile Siteverify enforcement outside the database transaction, with fail-closed provider handling, production hostname/action checks, durable failure attempts, and retry-safe vote idempotency.
 - Redis-backed expiring campaign/IP/device submission and failure counters, graceful outage degradation, and explainable burst/failure risk reasons.
+- Atomic invite-token claiming, transactionally completed idempotency records with stale-claim recovery, identity-scoped duplicate prevention, and PostgreSQL race coverage.
 - Prisma schema for users, auth sessions/accounts, elections, campaigns, options, voter identities, tokens, votes, attempts, ledger, idempotency, identity events, conflicts, counts, and audit logs.
 - Organizer election, campaign, and option management endpoints.
 - Public campaign details endpoint.
@@ -99,20 +100,18 @@ Important implementation shortcuts still present:
 - API schemas in OpenAPI are still generic and need precise request/response contracts.
 - The web app is still a static shell, not a usable organizer or voter UI.
 - Vote ledger event names in implementation are not yet fully normalized to the planned product event names.
-- Invite-token claiming currently checks then updates; before production it should be made atomic under concurrency.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
-Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, verified email identity, server-side bot protection, and temporary Redis abuse signals, but it is not production-ready until concurrency and operational hardening are done.
+Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, verified email identity, server-side bot protection, temporary Redis abuse signals, and database-backed concurrency protection, but it is not production-ready until contract, web-flow, and operational hardening are done.
 
 ## Remaining Core Work
 
 The next core work should happen in this order:
 
-1. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
-2. Normalize ledger event names to the product event catalog.
-3. Add precise OpenAPI schemas for all request and response bodies.
-4. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-5. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+1. Normalize ledger event names to the product event catalog.
+2. Add precise OpenAPI schemas for all request and response bodies.
+3. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
+4. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
 
 Deferred but already modeled:
 

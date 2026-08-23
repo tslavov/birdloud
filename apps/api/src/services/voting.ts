@@ -592,56 +592,58 @@ export class PrismaVotingService implements VotingService {
       });
 
       if (!verification.success) {
-        await this.prisma.voteAttempt.create({
-          data: {
-            campaignId,
-            optionId: input.optionId,
-            outcome: AttemptOutcome.INVALID,
-            reason: `${verification.kind === "unavailable" ? "turnstile_unavailable" : "turnstile_failed"}:${verification.errorCodes.join(",")}`,
-            ipHash: context.ip ? hashValue(context.ip) : null,
-            deviceHash: input.deviceId ? hashValue(input.deviceId) : null,
-            userAgentHash: context.userAgent ? hashValue(context.userAgent) : null
-          }
-        });
-
         if (verification.kind === "unavailable") {
           throw new ApiError(
             503,
             "BOT_PROTECTION_UNAVAILABLE",
-            "Bot protection is temporarily unavailable. Please try again."
+            "Bot protection is temporarily unavailable. Please try again.",
+            {
+              reason: "turnstile_unavailable",
+              errorCodes: verification.errorCodes
+            }
           );
         }
 
         throw new ApiError(
           403,
           "BOT_PROTECTION_FAILED",
-          "Bot protection verification failed. Please try again."
+          "Bot protection verification failed. Please try again.",
+          {
+            reason: "turnstile_failed",
+            errorCodes: verification.errorCodes
+          }
         );
       }
 
       const abuseSignals = await this.abuseSignalStore.observeVote(abuseSignalKeys);
 
-      const result = await this.prisma.$transaction((tx) =>
-        this.processVote(tx, campaignId, input, context, abuseSignals)
-      );
-
-      await this.prisma.idempotencyKey.update({
-        where: {
-          campaignId_key: {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const processed = await this.processVote(tx, campaignId, input, context, abuseSignals);
+        const completed = await tx.idempotencyKey.updateMany({
+          where: {
             campaignId,
-            key: input.idempotencyKey
+            key: input.idempotencyKey,
+            status: IdempotencyStatus.PROCESSING
+          },
+          data: {
+            status: IdempotencyStatus.COMPLETED,
+            statusCode: processed.statusCode,
+            responseBody: processed.body as unknown as Prisma.InputJsonObject
           }
-        },
-        data: {
-          status: IdempotencyStatus.COMPLETED,
-          statusCode: result.statusCode,
-          responseBody: result.body as unknown as Prisma.InputJsonObject
+        });
+
+        if (completed.count !== 1) {
+          throw conflict("IDEMPOTENCY_IN_PROGRESS", "This vote request is already processing.");
         }
+
+        return processed;
       });
 
       return result;
     } catch (error) {
+      const submissionError = normalizeVoteSubmissionError(error);
       await this.abuseSignalStore.recordFailure(abuseSignalKeys);
+      await this.persistFailedSubmission(campaignId, input, context, submissionError);
       await this.prisma.idempotencyKey.updateMany({
         where: {
           campaignId,
@@ -653,7 +655,7 @@ export class PrismaVotingService implements VotingService {
         }
       });
 
-      throw error;
+      throw submissionError;
     }
   }
 
@@ -827,16 +829,9 @@ export class PrismaVotingService implements VotingService {
     });
 
     if (!option) {
-      await this.recordAttempt(tx, {
-        campaignId,
-        optionId: input.optionId,
-        outcome: AttemptOutcome.INVALID,
-        reason: "invalid_option",
-        ipHash,
-        deviceHash,
-        userAgentHash
+      throw badRequest("The selected option is not valid for this campaign.", {
+        reason: "invalid_option"
       });
-      throw badRequest("The selected option is not valid for this campaign.");
     }
 
     const identity = await this.consumeEmailProof(
@@ -849,8 +844,7 @@ export class PrismaVotingService implements VotingService {
     const token = input.inviteToken
       ? await this.claimInviteToken(tx, campaignId, input.inviteToken)
       : null;
-    const tokenHash = input.inviteToken ? hashValue(input.inviteToken) : "no_invite_token";
-    const voterKeyHash = hashValue(`${campaignId}:${identity.id}:${tokenHash}`);
+    const voterKeyHash = hashValue(`${campaignId}:${identity.id}`);
 
     const duplicateVote = await tx.vote.findUnique({
       where: {
@@ -862,17 +856,11 @@ export class PrismaVotingService implements VotingService {
     });
 
     if (duplicateVote) {
-      await this.recordAttempt(tx, {
-        campaignId,
-        optionId: input.optionId,
-        voterKeyHash,
-        outcome: AttemptOutcome.DUPLICATE,
-        reason: "same_identity_or_token_already_voted",
-        ipHash,
-        deviceHash,
-        userAgentHash
-      });
-      throw conflict("ALREADY_VOTED", "A vote has already been submitted for this campaign.");
+      throw conflict(
+        "ALREADY_VOTED",
+        "A vote has already been submitted for this campaign.",
+        { reason: "same_identity_already_voted" }
+      );
     }
 
     const risk = await this.calculateRisk(tx, campaignId, {
@@ -885,31 +873,15 @@ export class PrismaVotingService implements VotingService {
     });
 
     if (risk.score >= 80) {
-      await this.recordAttempt(tx, {
-        campaignId,
-        optionId: input.optionId,
-        voterKeyHash,
-        outcome: AttemptOutcome.BLOCKED,
-        reason: risk.reasons.join(","),
-        riskScore: risk.score,
-        ipHash,
-        deviceHash,
-        userAgentHash
-      });
-      await tx.voteLedger.create({
-        data: {
-          campaignId,
-          eventType: "vote_blocked",
-          payload: {
-            reasons: risk.reasons,
-            riskScore: risk.score
-          }
-        }
-      });
       throw new ApiError(
         403,
         "VOTE_BLOCKED",
-        "This vote could not be accepted because it triggered integrity checks."
+        "This vote could not be accepted because it triggered integrity checks.",
+        {
+          reason: risk.reasons.join(","),
+          reasons: risk.reasons,
+          riskScore: risk.score
+        }
       );
     }
 
@@ -1071,6 +1043,7 @@ export class PrismaVotingService implements VotingService {
     }
 
     if (existing.status === IdempotencyStatus.FAILED) {
+      const lockedAt = new Date();
       const reclaimed = await this.prisma.idempotencyKey.updateMany({
         where: {
           id: existing.id,
@@ -1078,7 +1051,26 @@ export class PrismaVotingService implements VotingService {
         },
         data: {
           status: IdempotencyStatus.PROCESSING,
+          lockedAt,
           statusCode: null
+        }
+      });
+
+      if (reclaimed.count === 1) {
+        return { kind: "claimed" };
+      }
+    }
+
+    if (existing.status === IdempotencyStatus.PROCESSING) {
+      const staleBefore = new Date(Date.now() - 2 * 60 * 1000);
+      const reclaimed = await this.prisma.idempotencyKey.updateMany({
+        where: {
+          id: existing.id,
+          status: IdempotencyStatus.PROCESSING,
+          lockedAt: { lte: staleBefore }
+        },
+        data: {
+          lockedAt: new Date()
         }
       });
 
@@ -1117,18 +1109,77 @@ export class PrismaVotingService implements VotingService {
     });
 
     if (!option) {
-      await this.prisma.voteAttempt.create({
-        data: {
-          campaignId,
-          optionId,
-          outcome: AttemptOutcome.INVALID,
-          reason: "invalid_option",
-          ipHash: context.ip ? hashValue(context.ip) : null,
-          deviceHash: deviceId ? hashValue(deviceId) : null,
-          userAgentHash: context.userAgent ? hashValue(context.userAgent) : null
+      throw badRequest("The selected option is not valid for this campaign.", {
+        reason: "invalid_option"
+      });
+    }
+  }
+
+  private async persistFailedSubmission(
+    campaignId: string,
+    input: SubmitVoteInput,
+    context: SubmitVoteContext,
+    error: Error
+  ): Promise<void> {
+    if (
+      !(error instanceof ApiError) ||
+      error.code === "IDEMPOTENCY_CONFLICT" ||
+      error.code === "IDEMPOTENCY_IN_PROGRESS"
+    ) {
+      return;
+    }
+
+    const errorCodes = Array.isArray(error.details.errorCodes)
+      ? error.details.errorCodes.filter((value): value is string => typeof value === "string")
+      : [];
+    const detailReason =
+      typeof error.details.reason === "string"
+        ? error.details.reason
+        : failureReasonByCode[error.code] ?? error.code.toLowerCase();
+    const reason = errorCodes.length > 0 ? `${detailReason}:${errorCodes.join(",")}` : detailReason;
+    const riskScore =
+      typeof error.details.riskScore === "number" ? error.details.riskScore : 0;
+    const outcome =
+      error.code === "ALREADY_VOTED"
+        ? AttemptOutcome.DUPLICATE
+        : error.code === "VOTE_BLOCKED"
+          ? AttemptOutcome.BLOCKED
+          : AttemptOutcome.INVALID;
+    const attemptData: Prisma.VoteAttemptUncheckedCreateInput = {
+      campaignId,
+      optionId: input.optionId,
+      outcome,
+      reason,
+      riskScore
+    };
+    if (context.ip) attemptData.ipHash = hashValue(context.ip);
+    if (input.deviceId) attemptData.deviceHash = hashValue(input.deviceId);
+    if (context.userAgent) attemptData.userAgentHash = hashValue(context.userAgent);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.voteAttempt.create({ data: attemptData });
+
+        if (error.code === "VOTE_BLOCKED") {
+          const reasons = Array.isArray(error.details.reasons)
+            ? error.details.reasons.filter(
+                (value): value is string => typeof value === "string"
+              )
+            : [reason];
+          await tx.voteLedger.create({
+            data: {
+              campaignId,
+              eventType: "vote_blocked",
+              payload: {
+                reasons,
+                riskScore
+              }
+            }
+          });
         }
       });
-      throw badRequest("The selected option is not valid for this campaign.");
+    } catch {
+      // Preserve the original API error if durable failure logging itself cannot complete.
     }
   }
 
@@ -1206,20 +1257,35 @@ export class PrismaVotingService implements VotingService {
     });
 
     if (!token) {
-      throw new ApiError(403, "INVALID_INVITE_TOKEN", "The invite token is invalid.");
+      throw new ApiError(403, "INVALID_INVITE_TOKEN", "The invite token is invalid.", {
+        reason: "invalid_invite_token"
+      });
     }
 
     if (token.status !== TokenStatus.ACTIVE) {
-      throw conflict("INVITE_TOKEN_ALREADY_USED", "This invite token has already been used.");
+      throw conflict("INVITE_TOKEN_ALREADY_USED", "This invite token has already been used.", {
+        reason: "invite_token_already_used"
+      });
     }
 
-    return tx.voterToken.update({
-      where: { id: token.id },
+    const claimed = await tx.voterToken.updateMany({
+      where: {
+        id: token.id,
+        status: TokenStatus.ACTIVE
+      },
       data: {
         status: TokenStatus.USED,
         usedAt: new Date()
       }
     });
+
+    if (claimed.count !== 1) {
+      throw conflict("INVITE_TOKEN_ALREADY_USED", "This invite token has already been used.", {
+        reason: "invite_token_already_used"
+      });
+    }
+
+    return token;
   }
 
   private async calculateRisk(
@@ -1509,6 +1575,36 @@ function createVoteRequestHash(campaignId: string, input: SubmitVoteInput): stri
       deviceId: input.deviceId
     })
   );
+}
+
+const failureReasonByCode: Record<string, string> = {
+  ALREADY_VOTED: "same_identity_already_voted",
+  BOT_PROTECTION_FAILED: "turnstile_failed",
+  BOT_PROTECTION_UNAVAILABLE: "turnstile_unavailable",
+  CAMPAIGN_EXPIRED: "campaign_expired",
+  CAMPAIGN_NOT_ACTIVE: "campaign_not_active",
+  CAMPAIGN_NOT_STARTED: "campaign_not_started",
+  EMAIL_PROOF_ALREADY_USED: "email_proof_already_used",
+  EMAIL_VERIFICATION_REQUIRED: "email_verification_required",
+  INVALID_INVITE_TOKEN: "invalid_invite_token",
+  INVITE_TOKEN_ALREADY_USED: "invite_token_already_used",
+  VOTE_BLOCKED: "integrity_checks_blocked_vote"
+};
+
+function normalizeVoteSubmissionError(error: unknown): Error {
+  if (error instanceof ApiError) {
+    return error;
+  }
+
+  if (isPrismaError(error, "P2002")) {
+    return conflict(
+      "ALREADY_VOTED",
+      "A vote has already been submitted for this campaign.",
+      { reason: "same_identity_already_voted" }
+    );
+  }
+
+  return error instanceof Error ? error : new Error("Vote submission failed.");
 }
 
 function isPrismaError(error: unknown, code: string): boolean {
