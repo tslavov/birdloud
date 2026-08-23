@@ -20,16 +20,16 @@ Implemented:
 - API scaffold, health check, OpenAPI shell, and Prisma schema.
 - Better Auth endpoints and session-based organizer/admin route authorization.
 - Baseline Prisma migration, Docker-based PostgreSQL/Redis setup, safe synthetic seed, and database-backed auth integration test.
+- Campaign-scoped email magic links delivered over SMTP, with hashed one-time challenges and vote proofs.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
-- Email-based soft identity input.
+- Verified email soft identity without voter accounts.
 - Optional invite-token issuing, revocation, and use during voting.
 - Mandatory idempotency, receipts, vote attempts, vote ledger, review queue, results, integrity score, and aggregate JSON/CSV export.
 - Unit and route tests for the core backend behavior.
 
 Still required before production:
 
-- Real email magic-link verification and/or OAuth identity.
 - Cloudflare Turnstile verification on public vote submission.
 - Redis-backed abuse counters and stronger rate-limit signals.
 - Concurrency hardening for invite-token claiming and duplicate submissions.
@@ -66,7 +66,7 @@ npm run db:seed
 
 Use safe local values in `.env`. Do not commit real secrets, production database URLs, OAuth secrets, Turnstile secrets, real tokens, or voter data.
 
-The compose setup exposes the development database on port `5432`, an isolated integration-test database on port `5433`, and Redis on port `6379`. The seed is refused in production and creates only synthetic `.example.test` data. Override `SEED_ORGANIZER_EMAIL` and `SEED_ORGANIZER_PASSWORD` in your ignored local `.env` when needed.
+The compose setup exposes the development database on port `5432`, an isolated integration-test database on port `5433`, Redis on port `6379`, Mailpit SMTP on port `1025`, and the Mailpit inbox at `http://localhost:8025`. The seed is refused in production and creates only synthetic `.example.test` data. Override `SEED_ORGANIZER_EMAIL` and `SEED_ORGANIZER_PASSWORD` in your ignored local `.env` when needed.
 
 Run the apps:
 
@@ -111,6 +111,7 @@ Important V1 flows:
 - Add campaign options.
 - Activate the election and campaign.
 - Optionally issue invite tokens.
+- Request an email verification link and exchange its one-time token for an identity proof.
 - Submit votes with mandatory `idempotencyKey`.
 - Review suspicious votes.
 - Fetch results and integrity reports.
@@ -126,7 +127,7 @@ BirdLoud V1 helps with:
 
 - duplicate credential prevention
 - invite-token voting
-- email-based soft identity
+- verified email soft identity
 - idempotent vote submission
 - vote receipts
 - suspicious vote review

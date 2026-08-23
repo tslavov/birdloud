@@ -42,6 +42,14 @@ services:
       timeout: 5s
       retries: 12
 
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    environment:
+      MP_MAX_MESSAGES: 500
+
 volumes:
   birdloud_postgres_data:
   birdloud_postgres_test_data:

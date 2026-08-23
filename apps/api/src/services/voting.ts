@@ -2,11 +2,13 @@ import type { Prisma, PrismaClient, TrustLevel, VoteStatus } from "@prisma/clien
 import {
   AttemptOutcome,
   CampaignStatus,
+  EmailVerificationStatus,
   ElectionStatus,
   IdentityProvider,
   IdempotencyStatus,
   TokenStatus
 } from "@prisma/client";
+import { env } from "../config/env.js";
 import { ApiError, badRequest, conflict, forbidden, notFound } from "../http/errors.js";
 import { createOpaqueToken, hashValue, normalizeEmail } from "../lib/crypto.js";
 import {
@@ -16,6 +18,7 @@ import {
   calculateIntegrityScore,
   type CampaignStats
 } from "./voting-reporting.js";
+import type { VoterEmailSender } from "./voter-email.js";
 
 export type TokenSummaryDto = {
   active: number;
@@ -47,7 +50,18 @@ export type PublicCampaignDto = {
 
 export type VoteIdentityInput = {
   provider: "email";
-  email: string;
+  proof: string;
+};
+
+export type EmailVerificationRequestedDto = {
+  status: "verification_sent";
+  expiresInSeconds: number;
+};
+
+export type EmailVerifiedDto = {
+  status: "verified";
+  identityProof: string;
+  expiresAt: string;
 };
 
 export type SubmitVoteInput = {
@@ -149,6 +163,11 @@ export type VotingService = {
   getTokenSummary(organizerId: string, campaignId: string): Promise<TokenSummaryDto>;
   revokeToken(organizerId: string, campaignId: string, tokenId: string): Promise<void>;
   getPublicCampaign(campaignId: string): Promise<PublicCampaignDto>;
+  requestEmailVerification(
+    campaignId: string,
+    email: string
+  ): Promise<EmailVerificationRequestedDto>;
+  verifyEmail(campaignId: string, token: string): Promise<EmailVerifiedDto>;
   submitVote(
     campaignId: string,
     input: SubmitVoteInput,
@@ -167,10 +186,6 @@ export type VotingService = {
   ): Promise<CampaignExportDto>;
 };
 
-const providerToPrisma: Record<VoteIdentityInput["provider"], IdentityProvider> = {
-  email: IdentityProvider.EMAIL
-};
-
 const voteStatusToApi: Record<VoteStatus, VoteResponseDto["status"] | ReceiptStatusDto["voteStatus"]> = {
   COUNTED: "counted",
   DELAYED: "delayed",
@@ -186,7 +201,10 @@ const trustLevelToApi: Record<TrustLevel, VoteResponseDto["confidenceLevel"]> = 
 };
 
 export class PrismaVotingService implements VotingService {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly emailSender: VoterEmailSender
+  ) {}
 
   async issueTokens(
     organizerId: string,
@@ -324,6 +342,209 @@ export class PrismaVotingService implements VotingService {
         position: option.position
       }))
     };
+  }
+
+  async requestEmailVerification(
+    campaignId: string,
+    email: string
+  ): Promise<EmailVerificationRequestedDto> {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { election: true }
+    });
+
+    if (!campaign) {
+      throw notFound("Campaign was not found.");
+    }
+
+    this.validateCampaignWindow(campaign, new Date());
+
+    const normalizedEmail = normalizeEmail(email);
+    const emailHash = hashValue(normalizedEmail);
+    const token = createOpaqueToken("emv");
+    const tokenHash = hashValue(token);
+    const expiresInMinutes = env.VOTER_EMAIL_TOKEN_TTL_MINUTES;
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+    const challenge = await this.prisma.$transaction(async (tx) => {
+      await tx.emailVerificationChallenge.updateMany({
+        where: {
+          campaignId,
+          emailHash,
+          status: EmailVerificationStatus.PENDING
+        },
+        data: {
+          status: EmailVerificationStatus.SUPERSEDED
+        }
+      });
+
+      const created = await tx.emailVerificationChallenge.create({
+        data: {
+          campaignId,
+          emailHash,
+          tokenHash,
+          expiresAt
+        }
+      });
+
+      await tx.identityVerificationEvent.create({
+        data: {
+          campaignId,
+          provider: "email",
+          eventType: "email_verification_requested",
+          trustLevel: "MEDIUM",
+          metadata: {
+            challengeId: created.id,
+            expiresAt: expiresAt.toISOString()
+          }
+        }
+      });
+
+      return created;
+    });
+
+    const verificationUrl = new URL(
+      `/vote/${campaignId}/verify-email`,
+      env.VOTER_VERIFY_BASE_URL
+    );
+    verificationUrl.searchParams.set("token", token);
+
+    try {
+      await this.emailSender.sendVerificationEmail({
+        to: normalizedEmail,
+        campaignTitle: campaign.title,
+        verificationUrl: verificationUrl.toString(),
+        expiresInMinutes
+      });
+    } catch {
+      await this.prisma.$transaction([
+        this.prisma.emailVerificationChallenge.update({
+          where: { id: challenge.id },
+          data: { status: EmailVerificationStatus.DELIVERY_FAILED }
+        }),
+        this.prisma.identityVerificationEvent.create({
+          data: {
+            campaignId,
+            provider: "email",
+            eventType: "email_verification_delivery_failed",
+            trustLevel: "LOW",
+            reason: "smtp_delivery_failed",
+            metadata: {
+              challengeId: challenge.id
+            }
+          }
+        })
+      ]);
+
+      throw new ApiError(
+        503,
+        "EMAIL_DELIVERY_FAILED",
+        "The verification email could not be sent. Please try again."
+      );
+    }
+
+    return {
+      status: "verification_sent",
+      expiresInSeconds: expiresInMinutes * 60
+    };
+  }
+
+  async verifyEmail(campaignId: string, token: string): Promise<EmailVerifiedDto> {
+    const tokenHash = hashValue(token);
+    const now = new Date();
+    const proof = createOpaqueToken("emp");
+    const proofHash = hashValue(proof);
+    const proofExpiresAt = new Date(
+      now.getTime() + env.VOTER_EMAIL_TOKEN_TTL_MINUTES * 60 * 1000
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      const challenge = await tx.emailVerificationChallenge.findUnique({
+        where: { tokenHash },
+        include: {
+          campaign: {
+            include: { election: true }
+          }
+        }
+      });
+
+      if (!challenge || challenge.campaignId !== campaignId) {
+        throw new ApiError(403, "INVALID_EMAIL_VERIFICATION", "The verification link is invalid.");
+      }
+
+      this.validateCampaignWindow(challenge.campaign, now);
+
+      if (
+        challenge.status !== EmailVerificationStatus.PENDING ||
+        challenge.expiresAt <= now
+      ) {
+        throw new ApiError(
+          403,
+          "INVALID_EMAIL_VERIFICATION",
+          "The verification link is invalid or expired."
+        );
+      }
+
+      const identity = await tx.voterIdentity.upsert({
+        where: {
+          campaignId_provider_providerSubjectHash: {
+            campaignId,
+            provider: IdentityProvider.EMAIL,
+            providerSubjectHash: challenge.emailHash
+          }
+        },
+        create: {
+          campaignId,
+          provider: IdentityProvider.EMAIL,
+          providerSubjectHash: challenge.emailHash,
+          emailHash: challenge.emailHash,
+          trustLevel: "MEDIUM"
+        },
+        update: {}
+      });
+
+      const claimed = await tx.emailVerificationChallenge.updateMany({
+        where: {
+          id: challenge.id,
+          status: EmailVerificationStatus.PENDING,
+          expiresAt: { gt: now }
+        },
+        data: {
+          identityId: identity.id,
+          proofHash,
+          proofExpiresAt,
+          status: EmailVerificationStatus.VERIFIED,
+          verifiedAt: now
+        }
+      });
+
+      if (claimed.count !== 1) {
+        throw conflict(
+          "EMAIL_VERIFICATION_ALREADY_USED",
+          "This verification link has already been used."
+        );
+      }
+
+      await tx.identityVerificationEvent.create({
+        data: {
+          campaignId,
+          identityId: identity.id,
+          provider: "email",
+          eventType: "email_verified",
+          trustLevel: "MEDIUM",
+          metadata: {
+            challengeId: challenge.id,
+            proofExpiresAt: proofExpiresAt.toISOString()
+          }
+        }
+      });
+
+      return {
+        status: "verified",
+        identityProof: proof,
+        expiresAt: proofExpiresAt.toISOString()
+      };
+    });
   }
 
   async submitVote(
@@ -592,32 +813,12 @@ export class PrismaVotingService implements VotingService {
       throw badRequest("The selected option is not valid for this campaign.");
     }
 
-    const normalizedEmail = normalizeEmail(input.identity.email);
-    const emailHash = hashValue(normalizedEmail);
-    const provider = providerToPrisma[input.identity.provider];
-    const identityCreateData: Prisma.VoterIdentityUncheckedCreateInput = {
+    const identity = await this.consumeEmailProof(
+      tx,
       campaignId,
-      provider,
-      providerSubjectHash: emailHash,
-      emailHash,
-      trustLevel: "MEDIUM"
-    };
-
-    if (deviceHash !== undefined) identityCreateData.deviceHash = deviceHash;
-    if (ipHash !== undefined) identityCreateData.firstIpHash = ipHash;
-    if (userAgentHash !== undefined) identityCreateData.userAgentHash = userAgentHash;
-
-    const identity = await tx.voterIdentity.upsert({
-      where: {
-        campaignId_provider_providerSubjectHash: {
-          campaignId,
-          provider,
-          providerSubjectHash: emailHash
-        }
-      },
-      create: identityCreateData,
-      update: {}
-    });
+      input.identity.proof,
+      now
+    );
 
     const token = input.inviteToken
       ? await this.claimInviteToken(tx, campaignId, input.inviteToken)
@@ -777,6 +978,65 @@ export class PrismaVotingService implements VotingService {
     if (endsAt && endsAt <= now) {
       throw new ApiError(403, "CAMPAIGN_EXPIRED", "Voting for this campaign has ended.");
     }
+  }
+
+  private async consumeEmailProof(
+    tx: Prisma.TransactionClient,
+    campaignId: string,
+    proof: string,
+    now: Date
+  ) {
+    const proofHash = hashValue(proof);
+    const challenge = await tx.emailVerificationChallenge.findUnique({
+      where: { proofHash },
+      include: { identity: true }
+    });
+
+    if (
+      !challenge ||
+      challenge.campaignId !== campaignId ||
+      challenge.status !== EmailVerificationStatus.VERIFIED ||
+      !challenge.identity ||
+      !challenge.proofExpiresAt ||
+      challenge.proofExpiresAt <= now
+    ) {
+      throw new ApiError(
+        403,
+        "EMAIL_VERIFICATION_REQUIRED",
+        "A valid email verification proof is required to vote."
+      );
+    }
+
+    const consumed = await tx.emailVerificationChallenge.updateMany({
+      where: {
+        id: challenge.id,
+        status: EmailVerificationStatus.VERIFIED,
+        proofExpiresAt: { gt: now }
+      },
+      data: {
+        status: EmailVerificationStatus.CONSUMED,
+        consumedAt: now
+      }
+    });
+
+    if (consumed.count !== 1) {
+      throw conflict("EMAIL_PROOF_ALREADY_USED", "This email verification proof was already used.");
+    }
+
+    await tx.identityVerificationEvent.create({
+      data: {
+        campaignId,
+        identityId: challenge.identity.id,
+        provider: "email",
+        eventType: "email_verification_consumed",
+        trustLevel: challenge.identity.trustLevel,
+        metadata: {
+          challengeId: challenge.id
+        }
+      }
+    });
+
+    return challenge.identity;
   }
 
   private async claimInviteToken(

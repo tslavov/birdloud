@@ -37,7 +37,9 @@ databaseDescribe("database-backed Better Auth", () => {
     const app = await buildApp({
       authService,
       organizerService: new PrismaOrganizerService(database),
-      votingService: new PrismaVotingService(database)
+      votingService: new PrismaVotingService(database, {
+        async sendVerificationEmail() {}
+      })
     });
 
     const signUpResponse = await app.inject({

@@ -51,6 +51,15 @@ enum IdentityProvider {
   INVITE_TOKEN @map("invite_token")
 }
 
+enum EmailVerificationStatus {
+  PENDING         @map("pending")
+  VERIFIED        @map("verified")
+  CONSUMED        @map("consumed")
+  SUPERSEDED      @map("superseded")
+  EXPIRED         @map("expired")
+  DELIVERY_FAILED @map("delivery_failed")
+}
+
 enum TrustLevel {
   HIGH   @map("high")
   MEDIUM @map("medium")
@@ -192,6 +201,7 @@ model Campaign {
   election       Election                    @relation(fields: [electionId], references: [id], onDelete: Cascade)
   options        CampaignOption[]
   identities     VoterIdentity[]
+  emailVerificationChallenges EmailVerificationChallenge[]
   tokens         VoterToken[]
   votes          Vote[]
   attempts       VoteAttempt[]
@@ -240,6 +250,7 @@ model VoterIdentity {
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   votes    Vote[]
   identityEvents IdentityVerificationEvent[]
+  emailVerificationChallenges EmailVerificationChallenge[]
   conflicts IdentityConflict[]
 
   @@unique([campaignId, provider, providerSubjectHash])
@@ -247,6 +258,28 @@ model VoterIdentity {
   @@index([campaignId, deviceHash])
   @@index([campaignId, firstIpHash])
   @@map("voter_identities")
+}
+
+model EmailVerificationChallenge {
+  id             String                  @id @default(uuid()) @db.Uuid
+  campaignId     String                  @db.Uuid
+  identityId     String?                 @db.Uuid
+  emailHash      String
+  tokenHash      String                  @unique
+  proofHash      String?                 @unique
+  status         EmailVerificationStatus @default(PENDING)
+  expiresAt      DateTime
+  proofExpiresAt DateTime?
+  verifiedAt     DateTime?
+  consumedAt     DateTime?
+  createdAt      DateTime                @default(now())
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  identity VoterIdentity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, emailHash, status])
+  @@index([expiresAt])
+  @@map("email_verification_challenges")
 }
 
 model VoterToken {

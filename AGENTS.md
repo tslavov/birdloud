@@ -40,7 +40,6 @@ Build for:
 
 The repo currently has an MVP backend foundation, but several core V1 pieces are still placeholders or missing. Prioritize work in this order unless the user explicitly redirects:
 
-- Add real email magic-link voter verification and/or OAuth identity linking.
 - Add Cloudflare Turnstile verification to public vote submission.
 - Use Redis for temporary abuse counters and risk-scoring signals.
 - Harden invite-token claiming, idempotency, and duplicate-vote prevention under concurrent submissions.

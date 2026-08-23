@@ -77,10 +77,11 @@ Implemented:
 - Fastify API scaffold with Helmet, CORS, rate limiting plugin registration, OpenAPI/Swagger, and health route.
 - Better Auth endpoints and session-based organizer/admin route authorization.
 - Baseline Prisma migration, an isolated Docker development/test database workflow, a production-guarded synthetic seed, and a PostgreSQL-backed Better Auth session integration test.
+- Campaign-scoped email magic-link delivery over SMTP, hashed one-time challenges, short-lived vote proofs, and PostgreSQL integration coverage for proof consumption.
 - Prisma schema for users, auth sessions/accounts, elections, campaigns, options, voter identities, tokens, votes, attempts, ledger, idempotency, identity events, conflicts, counts, and audit logs.
 - Organizer election, campaign, and option management endpoints.
 - Public campaign details endpoint.
-- Email soft-identity vote submission with mandatory idempotency key.
+- Verified-email soft-identity vote submission with mandatory idempotency key.
 - Optional invite-token issuing, summary, revocation, and token claiming during vote submission.
 - Hashed tokens, receipts, email identity values, IP/device/user-agent signals where used by the vote path.
 - Vote receipts and receipt verification that does not reveal selected option.
@@ -92,7 +93,6 @@ Implemented:
 
 Important implementation shortcuts still present:
 
-- Public voter identity is currently direct email input, not a real email magic-link verification flow.
 - OAuth providers are not wired yet.
 - Cloudflare Turnstile verification is not wired into vote submission yet.
 - Redis is configured but not actively used for abuse counters or rate-limit state.
@@ -102,20 +102,19 @@ Important implementation shortcuts still present:
 - Invite-token claiming currently checks then updates; before production it should be made atomic under concurrency.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
-Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup and tested organizer sessions, but it is not production-ready until verified voter identity, bot protection, Redis signals, and concurrency hardening are done.
+Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, and verified email identity, but it is not production-ready until bot protection, Redis signals, and concurrency hardening are done.
 
 ## Remaining Core Work
 
 The next core work should happen in this order:
 
-1. Add real email magic-link voter verification or clearly rename the current email identity mode as unverified email identity.
-2. Add Cloudflare Turnstile verification to `POST /api/campaigns/:campaignId/votes`.
-3. Use Redis for vote abuse counters and rate-limit signals that feed risk scoring.
-4. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
-5. Normalize ledger event names to the product event catalog.
-6. Add precise OpenAPI schemas for all request and response bodies.
-7. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-8. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+1. Add Cloudflare Turnstile verification to `POST /api/campaigns/:campaignId/votes`.
+2. Use Redis for vote abuse counters and rate-limit signals that feed risk scoring.
+3. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
+4. Normalize ledger event names to the product event catalog.
+5. Add precise OpenAPI schemas for all request and response bodies.
+6. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
+7. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
 
 Deferred but already modeled:
 
@@ -1132,8 +1131,8 @@ My recommendation: default to `delayed` for medium risk when traffic is spiky, a
 Voter identity:
 
 ```http
-POST /api/voter/identity/email/start
-POST /api/voter/identity/email/verify
+POST /api/campaigns/:campaignId/identity/email/start
+POST /api/campaigns/:campaignId/identity/email/verify
 POST /api/voter/identity/oauth/:provider/start
 POST /api/voter/identity/oauth/:provider/callback
 ```
@@ -2005,8 +2004,6 @@ Implementation has started. These are the remaining decisions and setup tasks be
    - Results and integrity reporting.
 
 10. Continue implementation milestones.
-    - Add migrations and database setup scripts, then validate Better Auth against PostgreSQL.
-    - Add real email magic-link verification.
     - Add bot protection verification.
     - Add Redis-backed abuse counters.
     - Add concurrency hardening for vote/token/idempotency races.

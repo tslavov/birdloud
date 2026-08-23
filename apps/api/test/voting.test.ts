@@ -35,6 +35,23 @@ async function createActiveCampaign(organizer: MemoryOrganizerService) {
   return { election, campaign, option };
 }
 
+async function verifiedEmailProof(
+  voting: MemoryVotingService,
+  campaignId: string,
+  email: string
+): Promise<string> {
+  await voting.requestEmailVerification(campaignId, email);
+  const token = voting.lastVerificationTokenByEmail.get(
+    `${campaignId}:${email.trim().toLowerCase()}`
+  );
+
+  if (!token) {
+    throw new Error("Expected an email verification token.");
+  }
+
+  return (await voting.verifyEmail(campaignId, token)).identityProof;
+}
+
 describe("voting routes", () => {
   it("returns public campaign details with active options", async () => {
     const organizer = new MemoryOrganizerService();
@@ -113,13 +130,52 @@ describe("voting routes", () => {
       }
     });
     const inviteToken = tokenResponse.json().tokens[0].token;
+    const startVerificationResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/identity/email/start`,
+      payload: {
+        email: "voter@example.com"
+      }
+    });
+    expect(startVerificationResponse.statusCode).toBe(202);
+    expect(startVerificationResponse.json()).toMatchObject({
+      status: "verification_sent",
+      expiresInSeconds: 900
+    });
+    expect(startVerificationResponse.body).not.toContain("voter@example.com");
+    expect(startVerificationResponse.body).not.toContain("emv_");
+
+    const verificationToken = voting.lastVerificationTokenByEmail.get(
+      `${campaign.id}:voter@example.com`
+    );
+    expect(verificationToken).toBeDefined();
+    const verifyResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/identity/email/verify`,
+      payload: {
+        token: verificationToken
+      }
+    });
+    expect(verifyResponse.statusCode).toBe(200);
+    expect(verifyResponse.json().status).toBe("verified");
+
+    const reusedLinkResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/identity/email/verify`,
+      payload: {
+        token: verificationToken
+      }
+    });
+    expect(reusedLinkResponse.statusCode).toBe(403);
+    expect(reusedLinkResponse.json().error.code).toBe("INVALID_EMAIL_VERIFICATION");
+
     const payload = {
       optionId: option.id,
       idempotencyKey: randomUUID(),
       inviteToken,
       identity: {
         provider: "email",
-        email: "voter@example.com"
+        proof: verifyResponse.json().identityProof
       },
       deviceId: "device-12345"
     };
@@ -142,6 +198,17 @@ describe("voting routes", () => {
 
     expect(replayResponse.statusCode).toBe(201);
     expect(replayResponse.json()).toEqual(voteResponse.json());
+
+    const reusedProofResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        ...payload,
+        idempotencyKey: randomUUID()
+      }
+    });
+    expect(reusedProofResponse.statusCode).toBe(403);
+    expect(reusedProofResponse.json().error.code).toBe("EMAIL_VERIFICATION_REQUIRED");
 
     const receiptResponse = await app.inject({
       method: "GET",
@@ -166,13 +233,14 @@ describe("voting routes", () => {
     const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
     const idempotencyKey = randomUUID();
+    const firstProof = await verifiedEmailProof(voting, campaign.id, "voter@example.com");
 
     const firstPayload = {
       optionId: option.id,
       idempotencyKey,
       identity: {
         provider: "email",
-        email: "voter@example.com"
+        proof: firstProof
       }
     };
 
@@ -191,7 +259,7 @@ describe("voting routes", () => {
         ...firstPayload,
         identity: {
           provider: "email",
-          email: "other@example.com"
+          proof: await verifiedEmailProof(voting, campaign.id, "other@example.com")
         }
       }
     });
@@ -199,12 +267,17 @@ describe("voting routes", () => {
     expect(conflictResponse.statusCode).toBe(409);
     expect(conflictResponse.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
 
+    const duplicateProof = await verifiedEmailProof(voting, campaign.id, "voter@example.com");
     const duplicateResponse = await app.inject({
       method: "POST",
       url: `/api/campaigns/${campaign.id}/votes`,
       payload: {
         ...firstPayload,
-        idempotencyKey: randomUUID()
+        idempotencyKey: randomUUID(),
+        identity: {
+          provider: "email",
+          proof: duplicateProof
+        }
       }
     });
 
@@ -219,6 +292,7 @@ describe("voting routes", () => {
     const voting = new MemoryVotingService(organizer);
     const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
+    const firstProof = await verifiedEmailProof(voting, campaign.id, "review-me@example.com");
 
     const firstVoteResponse = await app.inject({
       method: "POST",
@@ -228,11 +302,13 @@ describe("voting routes", () => {
         idempotencyKey: randomUUID(),
         identity: {
           provider: "email",
-          email: "review-me@example.com"
+          proof: firstProof
         }
       }
     });
     voting.markVoteUnderReview(firstVoteResponse.json().voteId);
+
+    const secondProof = await verifiedEmailProof(voting, campaign.id, "reject-me@example.com");
 
     const secondVoteResponse = await app.inject({
       method: "POST",
@@ -242,7 +318,7 @@ describe("voting routes", () => {
         idempotencyKey: randomUUID(),
         identity: {
           provider: "email",
-          email: "reject-me@example.com"
+          proof: secondProof
         }
       }
     });
@@ -298,6 +374,7 @@ describe("voting routes", () => {
     const voting = new MemoryVotingService(organizer);
     const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
+    const countedProof = await verifiedEmailProof(voting, campaign.id, "counted@example.com");
 
     const countedResponse = await app.inject({
       method: "POST",
@@ -307,12 +384,14 @@ describe("voting routes", () => {
         idempotencyKey: randomUUID(),
         identity: {
           provider: "email",
-          email: "counted@example.com"
+          proof: countedProof
         }
       }
     });
 
     expect(countedResponse.statusCode).toBe(201);
+
+    const reviewProof = await verifiedEmailProof(voting, campaign.id, "reviewed@example.com");
 
     const reviewResponse = await app.inject({
       method: "POST",
@@ -322,7 +401,7 @@ describe("voting routes", () => {
         idempotencyKey: randomUUID(),
         identity: {
           provider: "email",
-          email: "reviewed@example.com"
+          proof: reviewProof
         }
       }
     });
@@ -333,6 +412,7 @@ describe("voting routes", () => {
       url: `/api/organizer/campaigns/${campaign.id}/review/${reviewResponse.json().voteId}/reject`,
     });
 
+    const duplicateProof = await verifiedEmailProof(voting, campaign.id, "counted@example.com");
     const duplicateResponse = await app.inject({
       method: "POST",
       url: `/api/campaigns/${campaign.id}/votes`,
@@ -341,7 +421,7 @@ describe("voting routes", () => {
         idempotencyKey: randomUUID(),
         identity: {
           provider: "email",
-          email: "counted@example.com"
+          proof: duplicateProof
         }
       }
     });
@@ -398,6 +478,7 @@ describe("voting routes", () => {
     const voting = new MemoryVotingService(organizer);
     const app = await buildVotingApp(organizer, voting);
     const { campaign, option } = await createActiveCampaign(organizer);
+    const exportProof = await verifiedEmailProof(voting, campaign.id, "export-voter@example.com");
 
     const voteResponse = await app.inject({
       method: "POST",
@@ -407,7 +488,7 @@ describe("voting routes", () => {
         idempotencyKey: randomUUID(),
         identity: {
           provider: "email",
-          email: "export-voter@example.com"
+          proof: exportProof
         }
       }
     });

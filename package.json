@@ -18,7 +18,7 @@
     "build": "npm run build --workspaces --if-present",
     "validate": "npm run check && npm run test && npm run build",
     "prisma:generate": "npm run prisma:generate -w @birdloud/api",
-    "infra:up": "docker compose up -d postgres postgres-test redis",
+    "infra:up": "docker compose up -d postgres postgres-test redis mailpit",
     "infra:down": "docker compose down",
     "db:migrate": "npm run db:migrate -w @birdloud/api",
     "db:deploy": "npm run db:deploy -w @birdloud/api",

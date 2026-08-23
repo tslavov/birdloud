@@ -23,10 +23,18 @@ const submitVoteSchema = z.object({
   idempotencyKey: z.string().uuid(),
   identity: z.object({
     provider: z.literal("email"),
-    email: z.string().email()
+    proof: z.string().trim().min(16).max(512)
   }),
   inviteToken: z.string().trim().min(8).optional(),
   deviceId: z.string().trim().min(8).max(256).optional()
+});
+
+const requestEmailVerificationSchema = z.object({
+  email: z.string().trim().email().max(320)
+});
+
+const verifyEmailSchema = z.object({
+  token: z.string().trim().min(16).max(512)
 });
 
 const exportQuerySchema = z.object({
@@ -190,6 +198,58 @@ export async function registerVotingRoutes(
       handle(reply, async () => {
         const { campaignId } = parseParams(request);
         return service.getPublicCampaign(requireParam(campaignId, "campaignId"));
+      })
+  );
+
+  app.post(
+    "/api/campaigns/:campaignId/identity/email/start",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "10 minutes"
+        }
+      },
+      schema: {
+        tags: ["voter"],
+        response: {
+          202: genericObjectSchema
+        }
+      }
+    },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const { campaignId } = parseParams(request);
+        const body = parseWithSchema(requestEmailVerificationSchema, request.body);
+        const result = await service.requestEmailVerification(
+          requireParam(campaignId, "campaignId"),
+          body.email
+        );
+        return reply.status(202).send(result);
+      })
+  );
+
+  app.post(
+    "/api/campaigns/:campaignId/identity/email/verify",
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "10 minutes"
+        }
+      },
+      schema: {
+        tags: ["voter"],
+        response: {
+          200: genericObjectSchema
+        }
+      }
+    },
+    async (request, reply) =>
+      handle(reply, async () => {
+        const { campaignId } = parseParams(request);
+        const body = parseWithSchema(verifyEmailSchema, request.body);
+        return service.verifyEmail(requireParam(campaignId, "campaignId"), body.token);
       })
   );
 

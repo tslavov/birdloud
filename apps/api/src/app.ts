@@ -11,12 +11,14 @@ import { registerHealthRoutes } from "./routes/health.js";
 import { registerOrganizerRoutes } from "./routes/organizer.js";
 import { registerVotingRoutes } from "./routes/voting.js";
 import { PrismaOrganizerService, type OrganizerService } from "./services/organizer.js";
+import { createVoterEmailSender, type VoterEmailSender } from "./services/voter-email.js";
 import { PrismaVotingService, type VotingService } from "./services/voting.js";
 
 export type BuildAppOptions = {
   authService?: AuthService;
   organizerService?: OrganizerService;
   votingService?: VotingService;
+  voterEmailSender?: VoterEmailSender;
 };
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -48,7 +50,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   );
   await registerVotingRoutes(
     app,
-    options.votingService ?? new PrismaVotingService(prisma),
+    options.votingService ??
+      new PrismaVotingService(prisma, options.voterEmailSender ?? createVoterEmailSender()),
     authService
   );
 

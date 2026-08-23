@@ -5,6 +5,8 @@ import type {
   CampaignExportFormat,
   CampaignIntegrityDto,
   CampaignResultsDto,
+  EmailVerificationRequestedDto,
+  EmailVerifiedDto,
   IssuedTokenDto,
   PublicCampaignDto,
   ReceiptStatusDto,
@@ -40,11 +42,21 @@ type StoredVote = {
   reviewedAt: string | null;
 };
 
+type StoredEmailVerification = {
+  campaignId: string;
+  email: string;
+  token: string;
+  proof: string | null;
+  status: "pending" | "verified" | "consumed" | "superseded";
+};
+
 export class MemoryVotingService implements VotingService {
   readonly tokens = new Map<string, StoredToken>();
   readonly votes = new Map<string, StoredVote>();
   readonly attempts: Array<{ campaignId: string; outcome: "blocked" | "duplicate" | "invalid" }> = [];
   readonly idempotency = new Map<string, { request: string; statusCode: number; body: VoteResponseDto }>();
+  readonly emailVerifications = new Map<string, StoredEmailVerification>();
+  readonly lastVerificationTokenByEmail = new Map<string, string>();
 
   constructor(private readonly organizer: MemoryOrganizerService) {}
 
@@ -134,6 +146,64 @@ export class MemoryVotingService implements VotingService {
     };
   }
 
+  async requestEmailVerification(
+    campaignId: string,
+    email: string
+  ): Promise<EmailVerificationRequestedDto> {
+    const campaign = this.organizer.campaigns.get(campaignId);
+
+    if (!campaign || campaign.status !== "active") {
+      throw new ApiError(403, "CAMPAIGN_NOT_ACTIVE", "This campaign is not currently accepting votes.");
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    for (const verification of this.emailVerifications.values()) {
+      if (
+        verification.campaignId === campaignId &&
+        verification.email === normalizedEmail &&
+        verification.status === "pending"
+      ) {
+        verification.status = "superseded";
+      }
+    }
+
+    const token = `emv_${randomUUID()}`;
+    this.emailVerifications.set(token, {
+      campaignId,
+      email: normalizedEmail,
+      token,
+      proof: null,
+      status: "pending"
+    });
+    this.lastVerificationTokenByEmail.set(`${campaignId}:${normalizedEmail}`, token);
+
+    return {
+      status: "verification_sent",
+      expiresInSeconds: 900
+    };
+  }
+
+  async verifyEmail(campaignId: string, token: string): Promise<EmailVerifiedDto> {
+    const verification = this.emailVerifications.get(token);
+
+    if (
+      !verification ||
+      verification.campaignId !== campaignId ||
+      verification.status !== "pending"
+    ) {
+      throw new ApiError(403, "INVALID_EMAIL_VERIFICATION", "The verification link is invalid or expired.");
+    }
+
+    verification.status = "verified";
+    verification.proof = `emp_${randomUUID()}`;
+
+    return {
+      status: "verified",
+      identityProof: verification.proof,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    };
+  }
+
   async submitVote(
     campaignId: string,
     input: SubmitVoteInput,
@@ -169,7 +239,22 @@ export class MemoryVotingService implements VotingService {
       throw badRequest("The selected option is not valid for this campaign.");
     }
 
-    const identityKey = `${input.identity.provider}:${input.identity.email.trim().toLowerCase()}`;
+    const verification = [...this.emailVerifications.values()].find(
+      (candidate) =>
+        candidate.campaignId === campaignId &&
+        candidate.proof === input.identity.proof &&
+        candidate.status === "verified"
+    );
+
+    if (!verification) {
+      throw new ApiError(
+        403,
+        "EMAIL_VERIFICATION_REQUIRED",
+        "A valid email verification proof is required to vote."
+      );
+    }
+
+    const identityKey = `${input.identity.provider}:${verification.email}`;
 
     if (
       [...this.votes.values()].some(
@@ -198,6 +283,8 @@ export class MemoryVotingService implements VotingService {
 
       token.status = "used";
     }
+
+    verification.status = "consumed";
 
     const vote: StoredVote = {
       id: randomUUID(),
