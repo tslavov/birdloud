@@ -13,7 +13,10 @@ type OpenApiOperation = {
   };
   responses?: Record<
     string,
-    { content?: Record<string, { schema?: Record<string, unknown> }> }
+    {
+      content?: Record<string, { schema?: Record<string, unknown> }>;
+      headers?: Record<string, Record<string, unknown>>;
+    }
   >;
 };
 
@@ -21,6 +24,7 @@ type OpenApiDocument = {
   openapi: string;
   paths: Record<string, Record<string, OpenApiOperation>>;
   components: {
+    headers: Record<string, Record<string, unknown>>;
     securitySchemes: Record<string, Record<string, unknown>>;
     schemas: Record<string, Record<string, unknown>>;
   };
@@ -28,6 +32,7 @@ type OpenApiDocument = {
 
 const expectedOperations = [
   ["get", "/health", "getHealth"],
+  ["get", "/ready", "getReadiness"],
   ["post", "/api/organizer/elections", "createElection"],
   ["get", "/api/organizer/elections", "listElections"],
   ["get", "/api/organizer/elections/{electionId}", "getElection"],
@@ -72,6 +77,14 @@ describe("OpenAPI contract", () => {
       in: "cookie",
       name: "better-auth.session_token"
     });
+    expect(document.components.headers.RequestId).toMatchObject({
+      schema: {
+        type: "string",
+        minLength: 8,
+        maxLength: 128,
+        pattern: "^[A-Za-z0-9._:-]+$"
+      }
+    });
 
     const documentedOperationIds: string[] = [];
     for (const [method, path, operationId] of expectedOperations) {
@@ -94,6 +107,9 @@ describe("OpenAPI contract", () => {
       }
 
       for (const [status, contract] of Object.entries(operation?.responses ?? {})) {
+        expect(contract.headers?.["x-request-id"], `${operationId} ${status}`).toEqual({
+          $ref: "#/components/headers/RequestId"
+        });
         if (!status.startsWith("2") || status === "204") continue;
         expect(contract.content, `${operationId} ${status}`).toBeDefined();
         for (const media of Object.values(contract.content ?? {})) {

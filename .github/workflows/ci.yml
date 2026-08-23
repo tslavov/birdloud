@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://birdloud:birdloud@127.0.0.1:5432/birdloud_test
+      TEST_DATABASE_URL: postgresql://birdloud:birdloud@127.0.0.1:5432/birdloud_test
+      REDIS_URL: redis://127.0.0.1:6379
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+      BIRDLOUD_HASH_SECRET: ci-only-hash-secret-not-for-production
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: birdloud_test
+          POSTGRES_USER: birdloud
+          POSTGRES_PASSWORD: birdloud
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U birdloud -d birdloud_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run db:deploy:test
+      - run: npm run validate
+      - run: npm run test:integration
+      - name: Exercise the vote burst target
+        run: npm run test:load
+        env:
+          LOAD_VOTES: 100
+          LOAD_CONCURRENCY: 20
+          LOAD_P95_TARGET_MS: 5000
+      - name: Build API image
+        run: docker build --file apps/api/Dockerfile --tag birdloud-api:ci .
+      - name: Build web image
+        run: >-
+          docker build
+          --file apps/web/Dockerfile
+          --build-arg VITE_API_URL=https://api.example.test
+          --build-arg VITE_TURNSTILE_SITE_KEY=1x00000000000000000000AA
+          --tag birdloud-web:ci
+          .

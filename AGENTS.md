@@ -38,8 +38,9 @@ Build for:
 
 ## Current Implementation Priorities
 
-The repo currently has a usable V1 application foundation. Prioritize operational hardening,
-deployment validation, and load testing before production claims unless the user explicitly redirects.
+The planned V1 application foundation and repository hardening are implemented. Before production
+claims, prioritize target-environment deployment validation, privacy review, retention enforcement,
+monitoring/alerts, restore/rollback rehearsal, and end-to-end staging load evidence.
 
 ## Deferred Scope
 

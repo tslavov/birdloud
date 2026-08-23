@@ -76,6 +76,7 @@ Implemented:
 - Responsive React Router 7 organizer and voter application with Tailwind and shadcn-style UI primitives.
 - Fastify API scaffold with Helmet, CORS, rate limiting plugin registration, OpenAPI/Swagger, and health route.
 - Better Auth endpoints and session-based organizer/admin route authorization.
+- Better Auth 1.7 account identity scoped by trusted issuer, with a credential-only backfill migration that refuses unknown provider mappings.
 - Baseline Prisma migration, an isolated Docker development/test database workflow, a production-guarded synthetic seed, and a PostgreSQL-backed Better Auth session integration test.
 - Campaign-scoped email magic-link delivery over SMTP, hashed one-time challenges, short-lived vote proofs, and PostgreSQL integration coverage for proof consumption.
 - Cloudflare Turnstile Siteverify enforcement outside the database transaction, with fail-closed provider handling, production hostname/action checks, durable failure attempts, and retry-safe vote idempotency.
@@ -98,18 +99,24 @@ Implemented:
 - Better Auth organizer sign-in/sign-up, election and campaign workspaces, choice setup, invite-token issuing, review actions, integrity-aware results, and aggregate exports.
 - Public magic-link verification, campaign ballot, Turnstile, retry-safe idempotent submission, and receipt verification UI that never reveals the selected choice.
 - Browser-state tests for proof expiry/consumption, stable device IDs, and idempotency-key reuse boundaries.
+- Redis-backed shared request limiting, safe request IDs, redacted structured logs, dependency readiness, production configuration guards, and graceful shutdown.
+- CI validation with PostgreSQL and Redis services, integration coverage, both Docker builds, and a configurable synthetic 100-vote concurrent database hot-path benchmark.
+- V1 operations, monitoring, recovery, retention, and launch-checklist documentation.
 
 Important implementation shortcuts still present:
 
 - OAuth providers are not wired yet.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
+- Scheduled PostgreSQL cleanup and external log/backup retention must be configured by the production operator.
+- The included burst harness isolates database hot-path behavior; target-environment end-to-end capacity still requires a staging rehearsal.
 
-Architectural read: BirdLoud is now a coherent V1 application foundation with reproducible database setup, tested organizer sessions, usable web journeys, verified email identity, server-side bot protection, temporary Redis abuse signals, and database-backed concurrency protection, but it is not production-ready until operational hardening and deployment validation are done.
+Architectural read: BirdLoud is now a coherent and operationally documented V1 application foundation with reproducible database setup, tested organizer sessions, usable web journeys, verified email identity, server-side bot protection, shared Redis controls, database-backed concurrency protection, and CI/load coverage. Production approval still depends on target-environment configuration, privacy review, monitoring, restore/rollback rehearsal, and launch evidence.
 
 ## Remaining Core Work
 
-The next core work is operational hardening: request IDs, structured logs, readiness checks,
-retention policy, launch checklist, continuous integration, and burst load tests.
+The repository implementation plan is complete. Remaining launch work is environment-specific:
+configure managed services and secrets, enforce the retention schedule, connect monitoring/alerts,
+rehearse restore and rollback, and run the end-to-end staging load target.
 
 Deferred but already modeled:
 

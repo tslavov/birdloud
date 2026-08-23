@@ -17,8 +17,9 @@ BirdLoud is currently a working V1 application foundation, not a production-read
 
 Implemented:
 
-- API scaffold, health check, precise OpenAPI 3 contracts for BirdLoud-owned routes, and Prisma schema.
+- API scaffold, distinct liveness/readiness checks, precise OpenAPI 3 contracts for BirdLoud-owned routes, and Prisma schema.
 - Better Auth endpoints and session-based organizer/admin route authorization.
+- Better Auth 1.7 account-issuer migration with a fail-safe credential backfill and secured dependency versions.
 - Baseline Prisma migration, Docker-based PostgreSQL/Redis setup, safe synthetic seed, and database-backed auth integration test.
 - Campaign-scoped email magic links delivered over SMTP, with hashed one-time challenges and vote proofs.
 - Server-side Cloudflare Turnstile verification with timeout, production hostname/action checks, and durable failed-attempt logging.
@@ -28,6 +29,9 @@ Implemented:
 - Exact request, parameter, success, error, session-security, export-content, and receipt-privacy schemas with automated OpenAPI completeness tests.
 - Responsive organizer workspaces for authentication, election/campaign setup, ballot choices, invite tokens, review decisions, results, integrity signals, and exports.
 - Public email-verification, ballot, Turnstile, idempotent submission, and privacy-safe receipt web flows.
+- Redis-backed cross-instance rate limiting, safe request-ID propagation, structured secret redaction, production environment guards, and graceful shutdown.
+- CI for checks, tests, builds, PostgreSQL/Redis integration, a 100-vote concurrent database burst, and both Docker images.
+- A deployment runbook, explicit V1 data-retention baseline, monitoring guidance, recovery notes, and launch checklist.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
@@ -37,7 +41,9 @@ Implemented:
 
 Still required before production:
 
-- Operational hardening, deployment validation, retention policy, monitoring guidance, and burst load tests.
+- Configure real managed services, secrets, domains, SMTP, Turnstile, alerts, retention enforcement, and backups.
+- Rehearse migrations, restore/rollback, and a full end-to-end burst in the target deployment.
+- Complete privacy/legal review and record launch-checklist evidence for the intended election use.
 
 ## Current Stack
 
@@ -97,6 +103,7 @@ npm run db:migrate
 npm run db:deploy:test
 npm run db:seed
 npm run test:integration
+npm run test:load
 npm run infra:down
 ```
 
@@ -107,6 +114,15 @@ at `http://localhost:4000/docs`, and local verification email is visible in Mail
 `npm run test:integration` targets `TEST_DATABASE_URL` when set and otherwise uses the isolated compose database on port `5433`. Run `npm run db:deploy:test` before the first integration test.
 
 Integration tests also use `TEST_REDIS_URL` or the compose Redis instance on port `6379`. Redis stores only expiring counters keyed by campaign IDs and already-hashed IP/device signals; PostgreSQL remains the durable source of truth.
+
+`npm run test:load` exercises 100 synthetic, unique verified credentials at concurrency 20 against
+the isolated PostgreSQL test database. See [operations](docs/operations.md) for tuning and limits.
+
+Operational references:
+
+- [Operations and deployment runbook](docs/operations.md)
+- [Data-retention baseline](docs/data-retention.md)
+- [Launch checklist](docs/launch-checklist.md)
 
 ## API Usage
 

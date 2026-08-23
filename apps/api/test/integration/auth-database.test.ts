@@ -69,6 +69,18 @@ databaseDescribe("database-backed Better Auth", () => {
     expect(signUpResponse.statusCode).toBe(200);
     const setCookie = signUpResponse.headers["set-cookie"];
     const cookie = Array.isArray(setCookie) ? setCookie.map(firstCookiePart).join("; ") : firstCookiePart(setCookie);
+    const credentialAccount = await database.account.findFirstOrThrow({
+      where: {
+        user: {
+          email: testEmail
+        }
+      }
+    });
+    expect(credentialAccount).toMatchObject({
+      issuer: "local:credential",
+      providerId: "credential",
+      accountId: credentialAccount.userId
+    });
 
     const organizerResponse = await app.inject({
       method: "GET",

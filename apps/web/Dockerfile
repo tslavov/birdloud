@@ -4,7 +4,7 @@ WORKDIR /app
 FROM base AS deps
 COPY package.json package-lock.json* ./
 COPY apps/web/package.json apps/web/package.json
-RUN npm install --include=dev
+RUN npm ci --include=dev
 
 FROM deps AS build
 ARG VITE_API_URL
