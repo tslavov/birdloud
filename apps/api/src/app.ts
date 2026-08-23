@@ -5,12 +5,14 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { env } from "./config/env.js";
 import { betterAuthService, type AuthService } from "./lib/auth.js";
 import { prisma } from "./lib/prisma.js";
+import { getRedis } from "./lib/redis.js";
 import { registerOpenApi } from "./plugins/openapi.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerOrganizerRoutes } from "./routes/organizer.js";
 import { registerVotingRoutes } from "./routes/voting.js";
 import { PrismaOrganizerService, type OrganizerService } from "./services/organizer.js";
+import { createAbuseSignalStore, type AbuseSignalStore } from "./services/abuse-signals.js";
 import { createVoterEmailSender, type VoterEmailSender } from "./services/voter-email.js";
 import { createTurnstileVerifier, type TurnstileVerifier } from "./services/turnstile.js";
 import { PrismaVotingService, type VotingService } from "./services/voting.js";
@@ -21,6 +23,7 @@ export type BuildAppOptions = {
   votingService?: VotingService;
   voterEmailSender?: VoterEmailSender;
   turnstileVerifier?: TurnstileVerifier;
+  abuseSignalStore?: AbuseSignalStore;
 };
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -56,7 +59,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       new PrismaVotingService(
         prisma,
         options.voterEmailSender ?? createVoterEmailSender(),
-        options.turnstileVerifier ?? createTurnstileVerifier()
+        options.turnstileVerifier ?? createTurnstileVerifier(),
+        options.abuseSignalStore ?? createAbuseSignalStore(getRedis())
       ),
     authService
   );

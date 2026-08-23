@@ -7,7 +7,8 @@ export default defineConfig({
     env: {
       TEST_DATABASE_URL:
         process.env.TEST_DATABASE_URL ??
-        "postgresql://birdloud:birdloud@localhost:5433/birdloud_test"
+        "postgresql://birdloud:birdloud@localhost:5433/birdloud_test",
+      TEST_REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379"
     }
   }
 });

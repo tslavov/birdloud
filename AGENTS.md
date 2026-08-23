@@ -40,7 +40,6 @@ Build for:
 
 The repo currently has an MVP backend foundation, but several core V1 pieces are still placeholders or missing. Prioritize work in this order unless the user explicitly redirects:
 
-- Use Redis for temporary abuse counters and risk-scoring signals.
 - Harden invite-token claiming, idempotency, and duplicate-vote prevention under concurrent submissions.
 - Normalize vote ledger event names to stable product event names.
 - Replace generic OpenAPI schemas with precise request/response contracts.

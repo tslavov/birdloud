@@ -22,6 +22,7 @@ Implemented:
 - Baseline Prisma migration, Docker-based PostgreSQL/Redis setup, safe synthetic seed, and database-backed auth integration test.
 - Campaign-scoped email magic links delivered over SMTP, with hashed one-time challenges and vote proofs.
 - Server-side Cloudflare Turnstile verification with timeout, production hostname/action checks, and durable failed-attempt logging.
+- Redis-backed short-lived IP/device submission and failure counters that feed explainable risk scoring without becoming authoritative.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
@@ -31,7 +32,6 @@ Implemented:
 
 Still required before production:
 
-- Redis-backed abuse counters and stronger rate-limit signals.
 - Concurrency hardening for invite-token claiming and duplicate submissions.
 - Precise OpenAPI request/response schemas.
 - Usable organizer and voter web flows.
@@ -92,6 +92,8 @@ npm run infra:down
 ```
 
 `npm run test:integration` targets `TEST_DATABASE_URL` when set and otherwise uses the isolated compose database on port `5433`. Run `npm run db:deploy:test` before the first integration test.
+
+Integration tests also use `TEST_REDIS_URL` or the compose Redis instance on port `6379`. Redis stores only expiring counters keyed by campaign IDs and already-hashed IP/device signals; PostgreSQL remains the durable source of truth.
 
 ## API Usage
 

@@ -6,6 +6,7 @@ import type {
   VoterEmailSender
 } from "../../src/services/voter-email.js";
 import { PrismaVotingService } from "../../src/services/voting.js";
+import { availableAbuseSignalStore } from "../support/test-abuse-signal-store.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const databaseDescribe = databaseUrl ? describe : describe.skip;
@@ -29,15 +30,20 @@ databaseDescribe("database-backed voter email verification", () => {
     }
   });
   const emailSender = new CapturingEmailSender();
-  const service = new PrismaVotingService(database, emailSender, {
-    async verify() {
-      return {
-        success: true as const,
-        hostname: "localhost",
-        action: "vote-submit"
-      };
-    }
-  });
+  const service = new PrismaVotingService(
+    database,
+    emailSender,
+    {
+      async verify() {
+        return {
+          success: true as const,
+          hostname: "localhost",
+          action: "vote-submit"
+        };
+      }
+    },
+    availableAbuseSignalStore
+  );
   const organizerId = randomUUID();
   const electionId = randomUUID();
   const campaignId = randomUUID();
@@ -186,25 +192,30 @@ databaseDescribe("database-backed voter email verification", () => {
     );
 
     let verificationCalls = 0;
-    const retryService = new PrismaVotingService(database, emailSender, {
-      async verify() {
-        verificationCalls += 1;
+    const retryService = new PrismaVotingService(
+      database,
+      emailSender,
+      {
+        async verify() {
+          verificationCalls += 1;
 
-        if (verificationCalls === 1) {
+          if (verificationCalls === 1) {
+            return {
+              success: false as const,
+              kind: "invalid" as const,
+              errorCodes: ["invalid-input-response"]
+            };
+          }
+
           return {
-            success: false as const,
-            kind: "invalid" as const,
-            errorCodes: ["invalid-input-response"]
+            success: true as const,
+            hostname: "localhost",
+            action: "vote-submit"
           };
         }
-
-        return {
-          success: true as const,
-          hostname: "localhost",
-          action: "vote-submit"
-        };
-      }
-    });
+      },
+      availableAbuseSignalStore
+    );
     const idempotencyKey = randomUUID();
     const voteInput = {
       optionId,
@@ -257,5 +268,71 @@ databaseDescribe("database-backed voter email verification", () => {
       }
     });
     expect(idempotency.status).toBe("COMPLETED");
+  });
+
+  it("maps Redis burst and failure counters to an explainable review decision", async () => {
+    const riskEmail = "redis-risk@example.test";
+    await service.requestEmailVerification(campaignId, riskEmail);
+    const verificationUrl = new URL(emailSender.sent.at(-1)?.verificationUrl ?? "");
+    const verification = await service.verifyEmail(
+      campaignId,
+      verificationUrl.searchParams.get("token") ?? ""
+    );
+    const riskService = new PrismaVotingService(
+      database,
+      emailSender,
+      {
+        async verify() {
+          return {
+            success: true as const,
+            hostname: "localhost",
+            action: "vote-submit"
+          };
+        }
+      },
+      {
+        async observeVote() {
+          return {
+            available: true,
+            recentIpSubmissions: 8,
+            recentDeviceSubmissions: 1,
+            recentIpFailures: 5,
+            recentDeviceFailures: 0
+          };
+        },
+        async recordFailure() {}
+      }
+    );
+
+    const result = await riskService.submitVote(
+      campaignId,
+      {
+        optionId,
+        idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
+        deviceId: "redis-risk-device",
+        identity: {
+          provider: "email",
+          proof: verification.identityProof
+        }
+      },
+      {
+        ip: "203.0.113.30",
+        userAgent: "BirdLoud Redis risk test"
+      }
+    );
+
+    expect(result.statusCode).toBe(202);
+    expect(result.body).toMatchObject({
+      status: "under_review",
+      confidenceLevel: "low"
+    });
+
+    const vote = await database.vote.findUniqueOrThrow({
+      where: { id: result.body.voteId }
+    });
+    expect(vote.riskScore).toBe(45);
+    expect(vote.reviewReason).toContain("abnormal_submission_speed");
+    expect(vote.reviewReason).toContain("too_many_failed_attempts");
   });
 });

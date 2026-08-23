@@ -12,6 +12,11 @@ import {
 import { env } from "../config/env.js";
 import { ApiError, badRequest, conflict, forbidden, notFound } from "../http/errors.js";
 import { createOpaqueToken, hashValue, normalizeEmail } from "../lib/crypto.js";
+import type {
+  AbuseSignalKeyInput,
+  AbuseSignalSnapshot,
+  AbuseSignalStore
+} from "./abuse-signals.js";
 import {
   buildCampaignStats,
   buildIntegritySignals,
@@ -203,11 +208,16 @@ const trustLevelToApi: Record<TrustLevel, VoteResponseDto["confidenceLevel"]> = 
   LOW: "low"
 };
 
+const recentIpSubmissionThreshold = 8;
+const recentDeviceSubmissionThreshold = 4;
+const recentFailureThreshold = 5;
+
 export class PrismaVotingService implements VotingService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly emailSender: VoterEmailSender,
-    private readonly turnstileVerifier: TurnstileVerifier
+    private readonly turnstileVerifier: TurnstileVerifier,
+    private readonly abuseSignalStore: AbuseSignalStore
   ) {}
 
   async issueTokens(
@@ -563,6 +573,10 @@ export class PrismaVotingService implements VotingService {
       return claim.result;
     }
 
+    const abuseSignalKeys: AbuseSignalKeyInput = { campaignId };
+    if (context.ip) abuseSignalKeys.ipHash = hashValue(context.ip);
+    if (input.deviceId) abuseSignalKeys.deviceHash = hashValue(input.deviceId);
+
     try {
       await this.validateVoteTargetBeforeBotProtection(
         campaignId,
@@ -605,8 +619,10 @@ export class PrismaVotingService implements VotingService {
         );
       }
 
+      const abuseSignals = await this.abuseSignalStore.observeVote(abuseSignalKeys);
+
       const result = await this.prisma.$transaction((tx) =>
-        this.processVote(tx, campaignId, input, context)
+        this.processVote(tx, campaignId, input, context, abuseSignals)
       );
 
       await this.prisma.idempotencyKey.update({
@@ -625,6 +641,7 @@ export class PrismaVotingService implements VotingService {
 
       return result;
     } catch (error) {
+      await this.abuseSignalStore.recordFailure(abuseSignalKeys);
       await this.prisma.idempotencyKey.updateMany({
         where: {
           campaignId,
@@ -780,7 +797,8 @@ export class PrismaVotingService implements VotingService {
     tx: Prisma.TransactionClient,
     campaignId: string,
     input: SubmitVoteInput,
-    context: SubmitVoteContext
+    context: SubmitVoteContext,
+    abuseSignals: AbuseSignalSnapshot
   ): Promise<{ statusCode: number; body: VoteResponseDto }> {
     const campaign = await tx.campaign.findUnique({
       where: { id: campaignId },
@@ -862,7 +880,8 @@ export class PrismaVotingService implements VotingService {
       ipHash,
       deviceHash,
       userAgentHash,
-      inviteTokenProvided: Boolean(input.inviteToken)
+      inviteTokenProvided: Boolean(input.inviteToken),
+      abuseSignals
     });
 
     if (risk.score >= 80) {
@@ -1212,6 +1231,7 @@ export class PrismaVotingService implements VotingService {
       deviceHash?: string | undefined;
       userAgentHash?: string | undefined;
       inviteTokenProvided: boolean;
+      abuseSignals: AbuseSignalSnapshot;
     }
   ): Promise<{ score: number; confidence: TrustLevel; reasons: string[] }> {
     let score = 0;
@@ -1274,6 +1294,30 @@ export class PrismaVotingService implements VotingService {
     if (!signals.inviteTokenProvided) {
       score += 10;
       reasons.push("no_invite_token");
+    }
+
+    if (!signals.abuseSignals.available) {
+      reasons.push("temporary_abuse_signals_unavailable");
+    }
+
+    if (signals.abuseSignals.recentIpSubmissions >= recentIpSubmissionThreshold) {
+      score += 15;
+      reasons.push("abnormal_submission_speed");
+    }
+
+    if (signals.abuseSignals.recentDeviceSubmissions >= recentDeviceSubmissionThreshold) {
+      score += 20;
+      reasons.push("device_submission_burst");
+    }
+
+    if (
+      Math.max(
+        signals.abuseSignals.recentIpFailures,
+        signals.abuseSignals.recentDeviceFailures
+      ) >= recentFailureThreshold
+    ) {
+      score += 20;
+      reasons.push("too_many_failed_attempts");
     }
 
     const confidence: TrustLevel = score >= 40 ? "LOW" : signals.inviteTokenProvided ? "HIGH" : "MEDIUM";

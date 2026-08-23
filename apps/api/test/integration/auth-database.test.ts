@@ -4,6 +4,7 @@ import { buildApp } from "../../src/app.js";
 import { createAuth, createBetterAuthService } from "../../src/lib/auth.js";
 import { PrismaOrganizerService } from "../../src/services/organizer.js";
 import { PrismaVotingService } from "../../src/services/voting.js";
+import { availableAbuseSignalStore } from "../support/test-abuse-signal-store.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const databaseDescribe = databaseUrl ? describe : describe.skip;
@@ -37,17 +38,22 @@ databaseDescribe("database-backed Better Auth", () => {
     const app = await buildApp({
       authService,
       organizerService: new PrismaOrganizerService(database),
-      votingService: new PrismaVotingService(database, {
-        async sendVerificationEmail() {}
-      }, {
-        async verify() {
-          return {
-            success: true as const,
-            hostname: "localhost",
-            action: "vote-submit"
-          };
-        }
-      })
+      votingService: new PrismaVotingService(
+        database,
+        {
+          async sendVerificationEmail() {}
+        },
+        {
+          async verify() {
+            return {
+              success: true as const,
+              hostname: "localhost",
+              action: "vote-submit"
+            };
+          }
+        },
+        availableAbuseSignalStore
+      )
     });
 
     const signUpResponse = await app.inject({

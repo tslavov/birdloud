@@ -79,6 +79,7 @@ Implemented:
 - Baseline Prisma migration, an isolated Docker development/test database workflow, a production-guarded synthetic seed, and a PostgreSQL-backed Better Auth session integration test.
 - Campaign-scoped email magic-link delivery over SMTP, hashed one-time challenges, short-lived vote proofs, and PostgreSQL integration coverage for proof consumption.
 - Cloudflare Turnstile Siteverify enforcement outside the database transaction, with fail-closed provider handling, production hostname/action checks, durable failure attempts, and retry-safe vote idempotency.
+- Redis-backed expiring campaign/IP/device submission and failure counters, graceful outage degradation, and explainable burst/failure risk reasons.
 - Prisma schema for users, auth sessions/accounts, elections, campaigns, options, voter identities, tokens, votes, attempts, ledger, idempotency, identity events, conflicts, counts, and audit logs.
 - Organizer election, campaign, and option management endpoints.
 - Public campaign details endpoint.
@@ -95,25 +96,23 @@ Implemented:
 Important implementation shortcuts still present:
 
 - OAuth providers are not wired yet.
-- Redis is configured but not actively used for abuse counters or rate-limit state.
 - API schemas in OpenAPI are still generic and need precise request/response contracts.
 - The web app is still a static shell, not a usable organizer or voter UI.
 - Vote ledger event names in implementation are not yet fully normalized to the planned product event names.
 - Invite-token claiming currently checks then updates; before production it should be made atomic under concurrency.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
-Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, verified email identity, and server-side bot protection, but it is not production-ready until Redis signals and concurrency hardening are done.
+Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, verified email identity, server-side bot protection, and temporary Redis abuse signals, but it is not production-ready until concurrency and operational hardening are done.
 
 ## Remaining Core Work
 
 The next core work should happen in this order:
 
-1. Use Redis for vote abuse counters and rate-limit signals that feed risk scoring.
-2. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
-3. Normalize ledger event names to the product event catalog.
-4. Add precise OpenAPI schemas for all request and response bodies.
-5. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-6. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+1. Make invite-token claiming atomic and add concurrency tests for token reuse and double submission.
+2. Normalize ledger event names to the product event catalog.
+3. Add precise OpenAPI schemas for all request and response bodies.
+4. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
+5. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
 
 Deferred but already modeled:
 
@@ -2003,7 +2002,6 @@ Implementation has started. These are the remaining decisions and setup tasks be
    - Results and integrity reporting.
 
 10. Continue implementation milestones.
-    - Add Redis-backed abuse counters.
     - Add concurrency hardening for vote/token/idempotency races.
     - Build usable web flows.
     - Add load testing and hardening.
