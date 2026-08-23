@@ -17,7 +17,7 @@ BirdLoud is currently an MVP backend foundation, not a production-ready service.
 
 Implemented:
 
-- API scaffold, health check, OpenAPI shell, and Prisma schema.
+- API scaffold, health check, precise OpenAPI 3 contracts for BirdLoud-owned routes, and Prisma schema.
 - Better Auth endpoints and session-based organizer/admin route authorization.
 - Baseline Prisma migration, Docker-based PostgreSQL/Redis setup, safe synthetic seed, and database-backed auth integration test.
 - Campaign-scoped email magic links delivered over SMTP, with hashed one-time challenges and vote proofs.
@@ -25,6 +25,7 @@ Implemented:
 - Redis-backed short-lived IP/device submission and failure counters that feed explainable risk scoring without becoming authoritative.
 - Atomic invite-token claims, transactionally completed idempotency records, stale-claim recovery, and PostgreSQL concurrency tests for duplicate submissions.
 - Versioned, stable product ledger events with atomic review/revocation transitions and an explicit V1 counted/review/blocked risk policy.
+- Exact request, parameter, success, error, session-security, export-content, and receipt-privacy schemas with automated OpenAPI completeness tests.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
@@ -34,7 +35,6 @@ Implemented:
 
 Still required before production:
 
-- Precise OpenAPI request/response schemas.
 - Usable organizer and voter web flows.
 
 ## Current Stack
@@ -122,7 +122,7 @@ Important V1 flows:
 - Fetch results and integrity reports.
 - Export aggregate reports as JSON or CSV.
 
-OpenAPI/Swagger is registered by the API app for endpoint exploration during development.
+OpenAPI/Swagger at `/docs` describes every BirdLoud-owned system, organizer, and voter operation. The upstream Better Auth catch-all protocol remains intentionally hidden; organizer operations document the Better Auth session-cookie security scheme.
 
 ## For Clients And Organizers
 

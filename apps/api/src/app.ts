@@ -3,6 +3,8 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { env } from "./config/env.js";
+import { registerErrorHandler } from "./http/error-handler.js";
+import { ApiError } from "./http/errors.js";
 import { betterAuthService, type AuthService } from "./lib/auth.js";
 import { prisma } from "./lib/prisma.js";
 import { getRedis } from "./lib/redis.js";
@@ -40,8 +42,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   await app.register(rateLimit, {
     max: 120,
-    timeWindow: "1 minute"
+    timeWindow: "1 minute",
+    errorResponseBuilder(_request, context) {
+      return new ApiError(
+        context.statusCode,
+        "RATE_LIMIT_EXCEEDED",
+        `Rate limit exceeded. Retry in ${context.after}.`,
+        {
+          retryAfter: context.after
+        }
+      );
+    }
   });
+  registerErrorHandler(app);
 
   const authService = options.authService ?? betterAuthService;
 

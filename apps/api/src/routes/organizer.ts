@@ -4,6 +4,7 @@ import { requireOrganizer } from "../http/authorization.js";
 import { ApiError, sendApiError } from "../http/errors.js";
 import { parseWithSchema } from "../http/validation.js";
 import type { AuthService } from "../lib/auth.js";
+import { ORGANIZER_API_CONTRACT } from "../openapi/contracts.js";
 import type { OrganizerService } from "../services/organizer.js";
 
 const uuidParamSchema = z.object({
@@ -56,16 +57,6 @@ const updateOptionSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field must be provided.");
 
-const genericObjectSchema = {
-  type: "object",
-  additionalProperties: true
-} as const;
-
-const genericArraySchema = {
-  type: "array",
-  items: genericObjectSchema
-} as const;
-
 export async function registerOrganizerRoutes(
   app: FastifyInstance,
   service: OrganizerService,
@@ -74,12 +65,7 @@ export async function registerOrganizerRoutes(
   app.post(
     "/api/organizer/elections",
     {
-      schema: {
-        tags: ["organizer"],
-        response: {
-          201: genericObjectSchema
-        }
-      }
+      schema: ORGANIZER_API_CONTRACT.createElection
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -93,12 +79,7 @@ export async function registerOrganizerRoutes(
   app.get(
     "/api/organizer/elections",
     {
-      schema: {
-        tags: ["organizer"],
-        response: {
-          200: genericArraySchema
-        }
-      }
+      schema: ORGANIZER_API_CONTRACT.listElections
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -110,12 +91,7 @@ export async function registerOrganizerRoutes(
   app.get(
     "/api/organizer/elections/:electionId",
     {
-      schema: {
-        tags: ["organizer"],
-        response: {
-          200: genericObjectSchema
-        }
-      }
+      schema: ORGANIZER_API_CONTRACT.getElection
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -128,12 +104,7 @@ export async function registerOrganizerRoutes(
   app.patch(
     "/api/organizer/elections/:electionId",
     {
-      schema: {
-        tags: ["organizer"],
-        response: {
-          200: genericObjectSchema
-        }
-      }
+      schema: ORGANIZER_API_CONTRACT.updateElection
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -146,7 +117,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/elections/:electionId/activate",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.activateElection },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -161,7 +132,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/elections/:electionId/close",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.closeElection },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -176,7 +147,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/elections/:electionId/archive",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.archiveElection },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -191,7 +162,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/elections/:electionId/campaigns",
-    { schema: { tags: ["organizer"], response: { 201: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.createCampaign },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -208,7 +179,7 @@ export async function registerOrganizerRoutes(
 
   app.get(
     "/api/organizer/elections/:electionId/campaigns",
-    { schema: { tags: ["organizer"], response: { 200: genericArraySchema } } },
+    { schema: ORGANIZER_API_CONTRACT.listCampaigns },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -219,7 +190,7 @@ export async function registerOrganizerRoutes(
 
   app.get(
     "/api/organizer/campaigns/:campaignId",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.getCampaign },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -230,7 +201,7 @@ export async function registerOrganizerRoutes(
 
   app.patch(
     "/api/organizer/campaigns/:campaignId",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.updateCampaign },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -242,7 +213,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/campaigns/:campaignId/activate",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.activateCampaign },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -257,7 +228,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/campaigns/:campaignId/close",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.closeCampaign },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -272,7 +243,7 @@ export async function registerOrganizerRoutes(
 
   app.post(
     "/api/organizer/campaigns/:campaignId/options",
-    { schema: { tags: ["organizer"], response: { 201: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.createCampaignOption },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -289,7 +260,7 @@ export async function registerOrganizerRoutes(
 
   app.patch(
     "/api/organizer/campaigns/:campaignId/options/:optionId",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: ORGANIZER_API_CONTRACT.updateCampaignOption },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -306,7 +277,7 @@ export async function registerOrganizerRoutes(
 
   app.delete(
     "/api/organizer/campaigns/:campaignId/options/:optionId",
-    { schema: { tags: ["organizer"], response: { 204: { type: "null" } } } },
+    { schema: ORGANIZER_API_CONTRACT.deleteCampaignOption },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);

@@ -4,6 +4,7 @@ import { requireOrganizer } from "../http/authorization.js";
 import { ApiError, sendApiError } from "../http/errors.js";
 import { parseWithSchema } from "../http/validation.js";
 import type { AuthService } from "../lib/auth.js";
+import { VOTING_API_CONTRACT } from "../openapi/contracts.js";
 import type { VotingService } from "../services/voting.js";
 
 const uuidParamSchema = z.object({
@@ -42,11 +43,6 @@ const exportQuerySchema = z.object({
   format: z.enum(["json", "csv"]).default("json")
 });
 
-const genericObjectSchema = {
-  type: "object",
-  additionalProperties: true
-} as const;
-
 export async function registerVotingRoutes(
   app: FastifyInstance,
   service: VotingService,
@@ -54,7 +50,7 @@ export async function registerVotingRoutes(
 ): Promise<void> {
   app.post(
     "/api/organizer/campaigns/:campaignId/voter-tokens",
-    { schema: { tags: ["organizer"], response: { 201: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.issueVoterTokens },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -71,7 +67,7 @@ export async function registerVotingRoutes(
 
   app.get(
     "/api/organizer/campaigns/:campaignId/voter-tokens/summary",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.getVoterTokenSummary },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -82,7 +78,7 @@ export async function registerVotingRoutes(
 
   app.post(
     "/api/organizer/campaigns/:campaignId/voter-tokens/:tokenId/revoke",
-    { schema: { tags: ["organizer"], response: { 204: { type: "null" } } } },
+    { schema: VOTING_API_CONTRACT.revokeVoterToken },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -98,7 +94,7 @@ export async function registerVotingRoutes(
 
   app.get(
     "/api/organizer/campaigns/:campaignId/review",
-    { schema: { tags: ["organizer"], response: { 200: { type: "array", items: genericObjectSchema } } } },
+    { schema: VOTING_API_CONTRACT.listReviewVotes },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -109,7 +105,7 @@ export async function registerVotingRoutes(
 
   app.get(
     "/api/organizer/campaigns/:campaignId/results",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.getCampaignResults },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -120,7 +116,7 @@ export async function registerVotingRoutes(
 
   app.get(
     "/api/organizer/campaigns/:campaignId/integrity",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.getCampaignIntegrity },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -132,12 +128,7 @@ export async function registerVotingRoutes(
   app.get(
     "/api/organizer/campaigns/:campaignId/export",
     {
-      schema: {
-        tags: ["organizer"],
-        response: {
-          200: genericObjectSchema
-        }
-      }
+      schema: VOTING_API_CONTRACT.exportCampaignReport
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -164,7 +155,7 @@ export async function registerVotingRoutes(
 
   app.post(
     "/api/organizer/campaigns/:campaignId/review/:voteId/approve",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.approveReviewVote },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -179,7 +170,7 @@ export async function registerVotingRoutes(
 
   app.post(
     "/api/organizer/campaigns/:campaignId/review/:voteId/reject",
-    { schema: { tags: ["organizer"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.rejectReviewVote },
     async (request, reply) =>
       handle(reply, async () => {
         const organizerId = await getOrganizerId(request, authService);
@@ -194,7 +185,7 @@ export async function registerVotingRoutes(
 
   app.get(
     "/api/campaigns/:campaignId",
-    { schema: { tags: ["voter"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.getPublicCampaign },
     async (request, reply) =>
       handle(reply, async () => {
         const { campaignId } = parseParams(request);
@@ -211,12 +202,7 @@ export async function registerVotingRoutes(
           timeWindow: "10 minutes"
         }
       },
-      schema: {
-        tags: ["voter"],
-        response: {
-          202: genericObjectSchema
-        }
-      }
+      schema: VOTING_API_CONTRACT.requestEmailVerification
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -239,12 +225,7 @@ export async function registerVotingRoutes(
           timeWindow: "10 minutes"
         }
       },
-      schema: {
-        tags: ["voter"],
-        response: {
-          200: genericObjectSchema
-        }
-      }
+      schema: VOTING_API_CONTRACT.verifyEmail
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -257,13 +238,7 @@ export async function registerVotingRoutes(
   app.post(
     "/api/campaigns/:campaignId/votes",
     {
-      schema: {
-        tags: ["voter"],
-        response: {
-          201: genericObjectSchema,
-          202: genericObjectSchema
-        }
-      }
+      schema: VOTING_API_CONTRACT.submitVote
     },
     async (request, reply) =>
       handle(reply, async () => {
@@ -280,7 +255,7 @@ export async function registerVotingRoutes(
 
   app.get(
     "/api/campaigns/:campaignId/receipts/:receipt",
-    { schema: { tags: ["voter"], response: { 200: genericObjectSchema } } },
+    { schema: VOTING_API_CONTRACT.verifyReceipt },
     async (request, reply) =>
       handle(reply, async () => {
         const { campaignId, receipt } = parseParams(request);

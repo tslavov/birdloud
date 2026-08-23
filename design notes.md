@@ -82,6 +82,7 @@ Implemented:
 - Redis-backed expiring campaign/IP/device submission and failure counters, graceful outage degradation, and explainable burst/failure risk reasons.
 - Atomic invite-token claiming, transactionally completed idempotency records with stale-claim recovery, identity-scoped duplicate prevention, and PostgreSQL race coverage.
 - Versioned stable product ledger events, legacy event-name migration, atomic review/revocation transitions, and database lifecycle coverage for counted, review, blocked, rejected, and duplicate outcomes.
+- Precise OpenAPI 3 contracts for every BirdLoud-owned route, including request/parameter constraints, success and error envelopes, organizer cookie security, multi-format exports, receipt privacy, and automated completeness coverage.
 - Prisma schema for users, auth sessions/accounts, elections, campaigns, options, voter identities, tokens, votes, attempts, ledger, idempotency, identity events, conflicts, counts, and audit logs.
 - Organizer election, campaign, and option management endpoints.
 - Public campaign details endpoint.
@@ -98,7 +99,6 @@ Implemented:
 Important implementation shortcuts still present:
 
 - OAuth providers are not wired yet.
-- API schemas in OpenAPI are still generic and need precise request/response contracts.
 - The web app is still a static shell, not a usable organizer or voter UI.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
@@ -108,9 +108,8 @@ Architectural read: the backend is now a good prototype/MVP foundation with repr
 
 The next core work should happen in this order:
 
-1. Add precise OpenAPI schemas for all request and response bodies.
-2. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-3. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+1. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
+2. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
 
 Deferred but already modeled:
 
