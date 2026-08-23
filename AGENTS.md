@@ -38,10 +38,8 @@ Build for:
 
 ## Current Implementation Priorities
 
-The repo currently has an MVP backend foundation, but several core V1 pieces are still placeholders or missing. Prioritize work in this order unless the user explicitly redirects:
-
-- Build usable organizer and voter web flows.
-- Add load tests and operational hardening before production claims.
+The repo currently has a usable V1 application foundation. Prioritize operational hardening,
+deployment validation, and load testing before production claims unless the user explicitly redirects.
 
 ## Deferred Scope
 

@@ -7,13 +7,13 @@ V1 focuses on making voting fast and simple for normal voters while making mass 
 ## What It Does
 
 - Organizers create elections, campaigns, and candidates/choices.
-- Voters view campaign details and submit votes through a simple API flow.
+- Voters verify email, view campaign details, and submit votes through a focused web or API flow.
 - The backend prevents duplicate credentials, records vote attempts, returns receipts, and flags risky activity.
 - Organizers can review suspicious votes, view results, inspect integrity signals, and export aggregate reports.
 
 ## Current Status
 
-BirdLoud is currently an MVP backend foundation, not a production-ready service.
+BirdLoud is currently a working V1 application foundation, not a production-ready service.
 
 Implemented:
 
@@ -26,6 +26,8 @@ Implemented:
 - Atomic invite-token claims, transactionally completed idempotency records, stale-claim recovery, and PostgreSQL concurrency tests for duplicate submissions.
 - Versioned, stable product ledger events with atomic review/revocation transitions and an explicit V1 counted/review/blocked risk policy.
 - Exact request, parameter, success, error, session-security, export-content, and receipt-privacy schemas with automated OpenAPI completeness tests.
+- Responsive organizer workspaces for authentication, election/campaign setup, ballot choices, invite tokens, review decisions, results, integrity signals, and exports.
+- Public email-verification, ballot, Turnstile, idempotent submission, and privacy-safe receipt web flows.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
@@ -35,7 +37,7 @@ Implemented:
 
 Still required before production:
 
-- Usable organizer and voter web flows.
+- Operational hardening, deployment validation, retention policy, monitoring guidance, and burst load tests.
 
 ## Current Stack
 
@@ -59,6 +61,7 @@ Setup:
 ```bash
 npm install
 cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env
 npm run infra:up
 npm run db:deploy
 npm run db:deploy:test
@@ -70,6 +73,11 @@ Use safe local values in `.env`. Do not commit real secrets, production database
 The compose setup exposes the development database on port `5432`, an isolated integration-test database on port `5433`, Redis on port `6379`, Mailpit SMTP on port `1025`, and the Mailpit inbox at `http://localhost:8025`. The seed is refused in production and creates only synthetic `.example.test` data. Override `SEED_ORGANIZER_EMAIL` and `SEED_ORGANIZER_PASSWORD` in your ignored local `.env` when needed.
 
 The example Turnstile secret is Cloudflare's public always-pass test key. Production startup rejects that key and also requires `TURNSTILE_EXPECTED_HOSTNAME` and `TURNSTILE_EXPECTED_ACTION`; never commit a real secret key.
+
+The web example uses Cloudflare's matching public test site key. Set `VITE_API_URL` and
+`VITE_TURNSTILE_SITE_KEY` at build time for a deployed web image; only the site key belongs in
+browser code. The Docker image includes SPA fallback routing for direct organizer, ballot, magic-link,
+and receipt URLs.
 
 Run the apps:
 
@@ -91,6 +99,10 @@ npm run db:seed
 npm run test:integration
 npm run infra:down
 ```
+
+The web app runs at `http://localhost:5173`, the API at `http://localhost:4000`, API documentation
+at `http://localhost:4000/docs`, and local verification email is visible in Mailpit at
+`http://localhost:8025`.
 
 `npm run test:integration` targets `TEST_DATABASE_URL` when set and otherwise uses the isolated compose database on port `5433`. Run `npm run db:deploy:test` before the first integration test.
 

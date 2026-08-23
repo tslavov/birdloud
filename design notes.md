@@ -68,12 +68,12 @@ These changes make the system more trustworthy without making the voter flow com
 
 Last reviewed: 2026-08-23.
 
-The repository currently has a working V1 backend foundation and a minimal web shell.
+The repository currently has a working V1 application foundation with usable organizer and voter flows.
 
 Implemented:
 
 - Monorepo with `apps/api` and `apps/web`.
-- React Router 7 web scaffold with Tailwind and shadcn-style UI primitives.
+- Responsive React Router 7 organizer and voter application with Tailwind and shadcn-style UI primitives.
 - Fastify API scaffold with Helmet, CORS, rate limiting plugin registration, OpenAPI/Swagger, and health route.
 - Better Auth endpoints and session-based organizer/admin route authorization.
 - Baseline Prisma migration, an isolated Docker development/test database workflow, a production-guarded synthetic seed, and a PostgreSQL-backed Better Auth session integration test.
@@ -95,21 +95,21 @@ Implemented:
 - Review queue with approve/reject actions.
 - Results endpoint, integrity endpoint, integrity score, integrity signals, and JSON/CSV aggregate export.
 - Unit tests for reporting logic and route-level tests for organizer and voting flows.
+- Better Auth organizer sign-in/sign-up, election and campaign workspaces, choice setup, invite-token issuing, review actions, integrity-aware results, and aggregate exports.
+- Public magic-link verification, campaign ballot, Turnstile, retry-safe idempotent submission, and receipt verification UI that never reveals the selected choice.
+- Browser-state tests for proof expiry/consumption, stable device IDs, and idempotency-key reuse boundaries.
 
 Important implementation shortcuts still present:
 
 - OAuth providers are not wired yet.
-- The web app is still a static shell, not a usable organizer or voter UI.
 - The database uniqueness rule currently applies to all `(campaign_id, voter_key_hash)` votes, not only active/countable statuses. This is stricter than the design and acceptable for V1, but it should be a deliberate product choice.
 
-Architectural read: the backend is now a good prototype/MVP foundation with reproducible database setup, tested organizer sessions, verified email identity, server-side bot protection, temporary Redis abuse signals, and database-backed concurrency protection, but it is not production-ready until contract, web-flow, and operational hardening are done.
+Architectural read: BirdLoud is now a coherent V1 application foundation with reproducible database setup, tested organizer sessions, usable web journeys, verified email identity, server-side bot protection, temporary Redis abuse signals, and database-backed concurrency protection, but it is not production-ready until operational hardening and deployment validation are done.
 
 ## Remaining Core Work
 
-The next core work should happen in this order:
-
-1. Build the first usable web flows: organizer workspace, campaign setup, public voting page, review queue, and results view.
-2. Add operational hardening: request IDs, structured logs, retention policy, launch checklist, and burst load tests.
+The next core work is operational hardening: request IDs, structured logs, readiness checks,
+retention policy, launch checklist, continuous integration, and burst load tests.
 
 Deferred but already modeled:
 
@@ -2002,8 +2002,6 @@ Implementation has started. These are the remaining decisions and setup tasks be
    - Results and integrity reporting.
 
 10. Continue implementation milestones.
-    - Add concurrency hardening for vote/token/idempotency races.
-    - Build usable web flows.
     - Add load testing and hardening.
 
 11. Define launch-readiness checks.
