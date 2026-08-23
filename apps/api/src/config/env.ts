@@ -16,7 +16,10 @@ const envSchema = z.object({
   BETTER_AUTH_URL: z.string().url().default("http://localhost:4000"),
   BIRDLOUD_HASH_SECRET: z.string().min(16).default("replace-with-local-hash-secret"),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
-  TURNSTILE_SECRET_KEY: optionalNonEmptyString,
+  TURNSTILE_SECRET_KEY: z.string().min(1).default("1x0000000000000000000000000000000AA"),
+  TURNSTILE_EXPECTED_HOSTNAME: optionalNonEmptyString,
+  TURNSTILE_EXPECTED_ACTION: optionalNonEmptyString,
+  TURNSTILE_TIMEOUT_MS: z.coerce.number().int().min(500).max(10000).default(3000),
   SMTP_HOST: z.string().min(1).default("localhost"),
   SMTP_PORT: z.coerce.number().int().positive().max(65535).default(1025),
   SMTP_SECURE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
@@ -30,6 +33,33 @@ const envSchema = z.object({
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: "SMTP_USER and SMTP_PASSWORD must be configured together."
+    });
+  }
+
+  if (
+    value.NODE_ENV === "production" &&
+    value.TURNSTILE_SECRET_KEY === "1x0000000000000000000000000000000AA"
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TURNSTILE_SECRET_KEY"],
+      message: "Production must use a real Turnstile secret key."
+    });
+  }
+
+  if (value.NODE_ENV === "production" && !value.TURNSTILE_EXPECTED_HOSTNAME) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TURNSTILE_EXPECTED_HOSTNAME"],
+      message: "Production must configure the expected Turnstile hostname."
+    });
+  }
+
+  if (value.NODE_ENV === "production" && !value.TURNSTILE_EXPECTED_ACTION) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TURNSTILE_EXPECTED_ACTION"],
+      message: "Production must configure the expected Turnstile action."
     });
   }
 });

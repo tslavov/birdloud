@@ -21,6 +21,7 @@ Implemented:
 - Better Auth endpoints and session-based organizer/admin route authorization.
 - Baseline Prisma migration, Docker-based PostgreSQL/Redis setup, safe synthetic seed, and database-backed auth integration test.
 - Campaign-scoped email magic links delivered over SMTP, with hashed one-time challenges and vote proofs.
+- Server-side Cloudflare Turnstile verification with timeout, production hostname/action checks, and durable failed-attempt logging.
 - Organizer election, campaign, and choice management.
 - Public campaign details and vote submission.
 - Verified email soft identity without voter accounts.
@@ -30,7 +31,6 @@ Implemented:
 
 Still required before production:
 
-- Cloudflare Turnstile verification on public vote submission.
 - Redis-backed abuse counters and stronger rate-limit signals.
 - Concurrency hardening for invite-token claiming and duplicate submissions.
 - Precise OpenAPI request/response schemas.
@@ -67,6 +67,8 @@ npm run db:seed
 Use safe local values in `.env`. Do not commit real secrets, production database URLs, OAuth secrets, Turnstile secrets, real tokens, or voter data.
 
 The compose setup exposes the development database on port `5432`, an isolated integration-test database on port `5433`, Redis on port `6379`, Mailpit SMTP on port `1025`, and the Mailpit inbox at `http://localhost:8025`. The seed is refused in production and creates only synthetic `.example.test` data. Override `SEED_ORGANIZER_EMAIL` and `SEED_ORGANIZER_PASSWORD` in your ignored local `.env` when needed.
+
+The example Turnstile secret is Cloudflare's public always-pass test key. Production startup rejects that key and also requires `TURNSTILE_EXPECTED_HOSTNAME` and `TURNSTILE_EXPECTED_ACTION`; never commit a real secret key.
 
 Run the apps:
 
@@ -112,7 +114,7 @@ Important V1 flows:
 - Activate the election and campaign.
 - Optionally issue invite tokens.
 - Request an email verification link and exchange its one-time token for an identity proof.
-- Submit votes with mandatory `idempotencyKey`.
+- Submit votes with mandatory `idempotencyKey` and `botProtectionToken`.
 - Review suspicious votes.
 - Fetch results and integrity reports.
 - Export aggregate reports as JSON or CSV.

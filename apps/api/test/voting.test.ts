@@ -172,6 +172,7 @@ describe("voting routes", () => {
     const payload = {
       optionId: option.id,
       idempotencyKey: randomUUID(),
+      botProtectionToken: "turnstile-test-token",
       inviteToken,
       identity: {
         provider: "email",
@@ -179,6 +180,16 @@ describe("voting routes", () => {
       },
       deviceId: "device-12345"
     };
+
+    const missingBotTokenResponse = await app.inject({
+      method: "POST",
+      url: `/api/campaigns/${campaign.id}/votes`,
+      payload: {
+        ...payload,
+        botProtectionToken: undefined
+      }
+    });
+    expect(missingBotTokenResponse.statusCode).toBe(400);
 
     const voteResponse = await app.inject({
       method: "POST",
@@ -238,6 +249,7 @@ describe("voting routes", () => {
     const firstPayload = {
       optionId: option.id,
       idempotencyKey,
+      botProtectionToken: "turnstile-test-token",
       identity: {
         provider: "email",
         proof: firstProof
@@ -300,6 +312,7 @@ describe("voting routes", () => {
       payload: {
         optionId: option.id,
         idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
         identity: {
           provider: "email",
           proof: firstProof
@@ -316,6 +329,7 @@ describe("voting routes", () => {
       payload: {
         optionId: option.id,
         idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
         identity: {
           provider: "email",
           proof: secondProof
@@ -382,6 +396,7 @@ describe("voting routes", () => {
       payload: {
         optionId: option.id,
         idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
         identity: {
           provider: "email",
           proof: countedProof
@@ -399,6 +414,7 @@ describe("voting routes", () => {
       payload: {
         optionId: option.id,
         idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
         identity: {
           provider: "email",
           proof: reviewProof
@@ -419,6 +435,7 @@ describe("voting routes", () => {
       payload: {
         optionId: option.id,
         idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
         identity: {
           provider: "email",
           proof: duplicateProof
@@ -486,6 +503,7 @@ describe("voting routes", () => {
       payload: {
         optionId: option.id,
         idempotencyKey: randomUUID(),
+        botProtectionToken: "turnstile-test-token",
         identity: {
           provider: "email",
           proof: exportProof

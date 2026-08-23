@@ -25,6 +25,7 @@ const submitVoteSchema = z.object({
     provider: z.literal("email"),
     proof: z.string().trim().min(16).max(512)
   }),
+  botProtectionToken: z.string().trim().min(1).max(2048),
   inviteToken: z.string().trim().min(8).optional(),
   deviceId: z.string().trim().min(8).max(256).optional()
 });

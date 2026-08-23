@@ -29,7 +29,15 @@ databaseDescribe("database-backed voter email verification", () => {
     }
   });
   const emailSender = new CapturingEmailSender();
-  const service = new PrismaVotingService(database, emailSender);
+  const service = new PrismaVotingService(database, emailSender, {
+    async verify() {
+      return {
+        success: true as const,
+        hostname: "localhost",
+        action: "vote-submit"
+      };
+    }
+  });
   const organizerId = randomUUID();
   const electionId = randomUUID();
   const campaignId = randomUUID();
@@ -113,6 +121,7 @@ databaseDescribe("database-backed voter email verification", () => {
     const voteInput = {
       optionId,
       idempotencyKey: randomUUID(),
+      botProtectionToken: "turnstile-test-token",
       identity: {
         provider: "email" as const,
         proof: verified.identityProof
@@ -165,5 +174,88 @@ databaseDescribe("database-backed voter email verification", () => {
       "email_verification_consumed"
     ]);
     expect(JSON.stringify(events)).not.toContain(voterEmail);
+  });
+
+  it("records a failed Turnstile attempt and retries the same vote key with a fresh token", async () => {
+    const retryEmail = "turnstile-retry@example.test";
+    await service.requestEmailVerification(campaignId, retryEmail);
+    const verificationUrl = new URL(emailSender.sent.at(-1)?.verificationUrl ?? "");
+    const verification = await service.verifyEmail(
+      campaignId,
+      verificationUrl.searchParams.get("token") ?? ""
+    );
+
+    let verificationCalls = 0;
+    const retryService = new PrismaVotingService(database, emailSender, {
+      async verify() {
+        verificationCalls += 1;
+
+        if (verificationCalls === 1) {
+          return {
+            success: false as const,
+            kind: "invalid" as const,
+            errorCodes: ["invalid-input-response"]
+          };
+        }
+
+        return {
+          success: true as const,
+          hostname: "localhost",
+          action: "vote-submit"
+        };
+      }
+    });
+    const idempotencyKey = randomUUID();
+    const voteInput = {
+      optionId,
+      idempotencyKey,
+      botProtectionToken: "failed-turnstile-token",
+      identity: {
+        provider: "email" as const,
+        proof: verification.identityProof
+      }
+    };
+
+    await expect(
+      retryService.submitVote(campaignId, voteInput, {
+        ip: "203.0.113.21",
+        userAgent: "BirdLoud Turnstile retry test"
+      })
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: "BOT_PROTECTION_FAILED"
+    });
+
+    const failedAttempt = await database.voteAttempt.findFirstOrThrow({
+      where: {
+        campaignId,
+        reason: "turnstile_failed:invalid-input-response"
+      }
+    });
+    expect(failedAttempt.outcome).toBe("INVALID");
+
+    const retry = await retryService.submitVote(
+      campaignId,
+      {
+        ...voteInput,
+        botProtectionToken: "fresh-turnstile-token"
+      },
+      {
+        ip: "203.0.113.21",
+        userAgent: "BirdLoud Turnstile retry test"
+      }
+    );
+    expect(retry.statusCode).toBe(201);
+    expect(verificationCalls).toBe(2);
+
+    const idempotency = await database.idempotencyKey.findUniqueOrThrow({
+      where: {
+        campaignId_key: {
+          campaignId,
+          key: idempotencyKey
+        }
+      }
+    });
+    expect(idempotency.status).toBe("COMPLETED");
   });
 });

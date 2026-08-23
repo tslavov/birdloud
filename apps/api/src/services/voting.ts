@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient, TrustLevel, VoteStatus } from "@prisma/client";
 import {
   AttemptOutcome,
@@ -18,6 +19,7 @@ import {
   calculateIntegrityScore,
   type CampaignStats
 } from "./voting-reporting.js";
+import type { TurnstileVerifier } from "./turnstile.js";
 import type { VoterEmailSender } from "./voter-email.js";
 
 export type TokenSummaryDto = {
@@ -68,6 +70,7 @@ export type SubmitVoteInput = {
   optionId: string;
   idempotencyKey: string;
   identity: VoteIdentityInput;
+  botProtectionToken: string;
   inviteToken?: string | undefined;
   deviceId?: string | undefined;
 };
@@ -203,7 +206,8 @@ const trustLevelToApi: Record<TrustLevel, VoteResponseDto["confidenceLevel"]> = 
 export class PrismaVotingService implements VotingService {
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly emailSender: VoterEmailSender
+    private readonly emailSender: VoterEmailSender,
+    private readonly turnstileVerifier: TurnstileVerifier
   ) {}
 
   async issueTokens(
@@ -552,84 +556,88 @@ export class PrismaVotingService implements VotingService {
     input: SubmitVoteInput,
     context: SubmitVoteContext
   ): Promise<{ statusCode: number; body: VoteResponseDto }> {
-    const requestHash = hashValue(JSON.stringify({ campaignId, input }));
+    const requestHash = createVoteRequestHash(campaignId, input);
+    const claim = await this.claimIdempotencyKey(campaignId, input.idempotencyKey, requestHash);
 
-    return this.prisma.$transaction(async (tx) => {
-      const existingKey = await tx.idempotencyKey.findUnique({
+    if (claim.kind === "replay") {
+      return claim.result;
+    }
+
+    try {
+      await this.validateVoteTargetBeforeBotProtection(
+        campaignId,
+        input.optionId,
+        input.deviceId,
+        context
+      );
+
+      const verification = await this.turnstileVerifier.verify({
+        token: input.botProtectionToken,
+        remoteIp: context.ip,
+        idempotencyKey: randomUUID()
+      });
+
+      if (!verification.success) {
+        await this.prisma.voteAttempt.create({
+          data: {
+            campaignId,
+            optionId: input.optionId,
+            outcome: AttemptOutcome.INVALID,
+            reason: `${verification.kind === "unavailable" ? "turnstile_unavailable" : "turnstile_failed"}:${verification.errorCodes.join(",")}`,
+            ipHash: context.ip ? hashValue(context.ip) : null,
+            deviceHash: input.deviceId ? hashValue(input.deviceId) : null,
+            userAgentHash: context.userAgent ? hashValue(context.userAgent) : null
+          }
+        });
+
+        if (verification.kind === "unavailable") {
+          throw new ApiError(
+            503,
+            "BOT_PROTECTION_UNAVAILABLE",
+            "Bot protection is temporarily unavailable. Please try again."
+          );
+        }
+
+        throw new ApiError(
+          403,
+          "BOT_PROTECTION_FAILED",
+          "Bot protection verification failed. Please try again."
+        );
+      }
+
+      const result = await this.prisma.$transaction((tx) =>
+        this.processVote(tx, campaignId, input, context)
+      );
+
+      await this.prisma.idempotencyKey.update({
         where: {
           campaignId_key: {
             campaignId,
             key: input.idempotencyKey
           }
+        },
+        data: {
+          status: IdempotencyStatus.COMPLETED,
+          statusCode: result.statusCode,
+          responseBody: result.body as unknown as Prisma.InputJsonObject
         }
       });
 
-      if (existingKey) {
-        if (existingKey.requestHash !== requestHash) {
-          throw conflict(
-            "IDEMPOTENCY_CONFLICT",
-            "This idempotency key was already used with a different request."
-          );
-        }
-
-        if (
-          existingKey.status === IdempotencyStatus.COMPLETED &&
-          existingKey.responseBody &&
-          existingKey.statusCode
-        ) {
-          return {
-            statusCode: existingKey.statusCode,
-            body: existingKey.responseBody as VoteResponseDto
-          };
-        }
-
-        throw conflict("IDEMPOTENCY_IN_PROGRESS", "This vote request is already processing.");
-      }
-
-      await tx.idempotencyKey.create({
-        data: {
+      return result;
+    } catch (error) {
+      await this.prisma.idempotencyKey.updateMany({
+        where: {
           campaignId,
           key: input.idempotencyKey,
-          requestHash,
-          status: IdempotencyStatus.PROCESSING,
-          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000)
+          status: IdempotencyStatus.PROCESSING
+        },
+        data: {
+          status: IdempotencyStatus.FAILED
         }
       });
 
-      try {
-        const result = await this.processVote(tx, campaignId, input, context);
-
-        await tx.idempotencyKey.update({
-          where: {
-            campaignId_key: {
-              campaignId,
-              key: input.idempotencyKey
-            }
-          },
-          data: {
-            status: IdempotencyStatus.COMPLETED,
-            statusCode: result.statusCode,
-            responseBody: result.body as unknown as Prisma.InputJsonObject
-          }
-        });
-
-        return result;
-      } catch (error) {
-        await tx.idempotencyKey.update({
-          where: {
-            campaignId_key: {
-              campaignId,
-              key: input.idempotencyKey
-            }
-          },
-          data: {
-            status: IdempotencyStatus.FAILED
-          }
-        });
-
-        throw error;
-      }
-    });
+      throw error;
+    }
   }
 
   async verifyReceipt(campaignId: string, receipt: string): Promise<ReceiptStatusDto> {
@@ -980,6 +988,131 @@ export class PrismaVotingService implements VotingService {
     }
   }
 
+  private async claimIdempotencyKey(
+    campaignId: string,
+    key: string,
+    requestHash: string
+  ): Promise<
+    | { kind: "claimed" }
+    | { kind: "replay"; result: { statusCode: number; body: VoteResponseDto } }
+  > {
+    try {
+      await this.prisma.idempotencyKey.create({
+        data: {
+          campaignId,
+          key,
+          requestHash,
+          status: IdempotencyStatus.PROCESSING,
+          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000)
+        }
+      });
+      return { kind: "claimed" };
+    } catch (error) {
+      if (isPrismaError(error, "P2003")) {
+        throw notFound("Campaign was not found.");
+      }
+
+      if (!isPrismaError(error, "P2002")) {
+        throw error;
+      }
+    }
+
+    const existing = await this.prisma.idempotencyKey.findUnique({
+      where: {
+        campaignId_key: {
+          campaignId,
+          key
+        }
+      }
+    });
+
+    if (!existing) {
+      throw conflict("IDEMPOTENCY_IN_PROGRESS", "This vote request is already processing.");
+    }
+
+    if (existing.requestHash !== requestHash) {
+      throw conflict(
+        "IDEMPOTENCY_CONFLICT",
+        "This idempotency key was already used with a different request."
+      );
+    }
+
+    if (
+      existing.status === IdempotencyStatus.COMPLETED &&
+      existing.responseBody &&
+      existing.statusCode
+    ) {
+      return {
+        kind: "replay",
+        result: {
+          statusCode: existing.statusCode,
+          body: existing.responseBody as VoteResponseDto
+        }
+      };
+    }
+
+    if (existing.status === IdempotencyStatus.FAILED) {
+      const reclaimed = await this.prisma.idempotencyKey.updateMany({
+        where: {
+          id: existing.id,
+          status: IdempotencyStatus.FAILED
+        },
+        data: {
+          status: IdempotencyStatus.PROCESSING,
+          statusCode: null
+        }
+      });
+
+      if (reclaimed.count === 1) {
+        return { kind: "claimed" };
+      }
+    }
+
+    throw conflict("IDEMPOTENCY_IN_PROGRESS", "This vote request is already processing.");
+  }
+
+  private async validateVoteTargetBeforeBotProtection(
+    campaignId: string,
+    optionId: string,
+    deviceId: string | undefined,
+    context: SubmitVoteContext
+  ): Promise<void> {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { election: true }
+    });
+
+    if (!campaign) {
+      throw notFound("Campaign was not found.");
+    }
+
+    this.validateCampaignWindow(campaign, new Date());
+
+    const option = await this.prisma.campaignOption.findFirst({
+      where: {
+        id: optionId,
+        campaignId,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    if (!option) {
+      await this.prisma.voteAttempt.create({
+        data: {
+          campaignId,
+          optionId,
+          outcome: AttemptOutcome.INVALID,
+          reason: "invalid_option",
+          ipHash: context.ip ? hashValue(context.ip) : null,
+          deviceHash: deviceId ? hashValue(deviceId) : null,
+          userAgentHash: context.userAgent ? hashValue(context.userAgent) : null
+        }
+      });
+      throw badRequest("The selected option is not valid for this campaign.");
+    }
+  }
+
   private async consumeEmailProof(
     tx: Prisma.TransactionClient,
     campaignId: string,
@@ -1320,6 +1453,27 @@ function mapCampaignStatus(status: CampaignStatus): CampaignResultsDto["status"]
   if (status === "ACTIVE") return "active";
   if (status === "CLOSED") return "closed";
   return "draft";
+}
+
+function createVoteRequestHash(campaignId: string, input: SubmitVoteInput): string {
+  return hashValue(
+    JSON.stringify({
+      campaignId,
+      optionId: input.optionId,
+      identity: input.identity,
+      inviteToken: input.inviteToken,
+      deviceId: input.deviceId
+    })
+  );
+}
+
+function isPrismaError(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
 }
 
 function mapReviewVote(vote: {

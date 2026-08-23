@@ -39,6 +39,14 @@ databaseDescribe("database-backed Better Auth", () => {
       organizerService: new PrismaOrganizerService(database),
       votingService: new PrismaVotingService(database, {
         async sendVerificationEmail() {}
+      }, {
+        async verify() {
+          return {
+            success: true as const,
+            hostname: "localhost",
+            action: "vote-submit"
+          };
+        }
       })
     });
 
